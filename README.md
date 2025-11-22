@@ -17,7 +17,7 @@ This node package brings Meta's SAM3 model to ComfyUI, enabling:
 
 ### Video Segmentation
 ![Video Segmentation Example](assets/video.png)
-*Example of semantic segmentation on video frames*
+*Example of points coordinates segmentation on video frames*
 
 ## Features
 

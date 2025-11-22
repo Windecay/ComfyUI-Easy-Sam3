@@ -17,7 +17,7 @@
 
 ### 视频分割
 ![视频分割示例](assets/video.png)
-*视频帧语义分割示例*
+*视频帧点坐标分割示例*
 
 
 ## 功能特性
@@ -52,8 +52,8 @@
 - `threshold`：检测的置信度阈值（0.0-1.0，默认：0.60）
 - `keep_model_loaded`：推理后将模型保留在显存中
 - `add_background`：添加背景颜色（无、黑色、白色、灰色）
-- `coordinates_positive`（可选）：正向点击坐标以细化分割
-- `coordinates_negative`（可选）：负向点击坐标以排除区域
+- `coordinates_positive`（可选）：正向点坐标以细化分割
+- `coordinates_negative`（可选）：负向点坐标以排除区域
 - `bboxes`（可选）：边界框来引导分割
 - `mask`（可选）：用于细化的输入遮罩
 
