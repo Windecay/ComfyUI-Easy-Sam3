@@ -19,7 +19,6 @@
 ![视频分割示例](assets/video.png)
 *视频帧语义分割示例*
 
-> **注意**：目前本插件仅支持了**语义分割**功能
 
 ## 功能特性
 
@@ -44,52 +43,74 @@
 - `sam3_model`：已加载的 SAM3 模型，供下游节点使用
 
 ### 2. SAM3 图像分割
-使用文本提示分割图像中的对象。
+使用文本提示和可选的几何提示分割图像中的对象。
 
 **输入：**
 - `sam3_model`：来自"加载 SAM3 模型"节点的 SAM3 模型
 - `images`：要分割的输入图像
 - `prompt`：要分割的对象的文本描述（例如："一只猫"、"人"）
-- `threshold`：检测的置信度阈值（0.0-1.0）
+- `threshold`：检测的置信度阈值（0.0-1.0，默认：0.60）
 - `keep_model_loaded`：推理后将模型保留在显存中
 - `add_background`：添加背景颜色（无、黑色、白色、灰色）
+- `coordinates_positive`（可选）：正向点击坐标以细化分割
+- `coordinates_negative`（可选）：负向点击坐标以排除区域
+- `bboxes`（可选）：边界框来引导分割
+- `mask`（可选）：用于细化的输入遮罩
 
 **输出：**
 - `masks`：分割遮罩
 - `images`：分割后的图像（可选背景）
+- `boxes`：检测到的对象的边界框坐标
+- `scores`：每个检测的置信度分数
 
 ### 3. SAM3 视频分割
-跨视频帧跟踪和分割对象。
+跨视频帧跟踪和分割对象，支持高级提示选项。
 
 **输入：**
 - `sam3_model`：视频模式的 SAM3 模型
-- `session_id`：可选的会话 ID，用于恢复跟踪
+- `session_id`（可选）：会话 ID，用于从之前的会话恢复跟踪
 - `video_frames`：作为图像序列的视频帧
-- `prompt`：要跟踪的对象的文本描述
-- `score_threshold_detection`：检测置信度阈值
-- `new_det_thresh`：添加新对象的阈值
-- `propagation_direction`：传播方向 (双向、前向、后向）
-- `start_frame_index`：开始传播的帧索引
-- `keep_model_loaded`：将模型保留在显存中
-- `close_after_propagation`：完成后关闭会话
-- `extra_config`：来自额外配置节点的附加配置
+- `prompt`：要跟踪的对象的文本描述（例如："人"、"汽车"）
+- `frame_index`：应用初始提示的帧位置（0 到最大帧数）
+- `object_id`：多对象跟踪的唯一 ID（1-1000，默认：1）
+- `score_threshold_detection`：检测置信度阈值（0.0-1.0，默认：0.5）
+- `new_det_thresh`：添加新对象的阈值（0.0-1.0，默认：0.7）
+- `propagation_direction`：传播方向（双向、前向、后向）
+- `start_frame_index`：开始传播的帧索引（默认：0）
+- `max_frames_to_track`：要处理的最大帧数（-1 表示所有帧）
+- `close_after_propagation`：完成后关闭会话（默认：True）
+- `keep_model_loaded`：推理后将模型保留在显存中
+- `extra_config`（可选）：来自额外配置节点的附加配置
+- `positive_coords`（可选）：正向点击坐标，JSON 数组格式
+- `negative_coords`（可选）：负向点击坐标，JSON 数组格式
+- `bbox`（可选）：用于初始化跟踪的边界框
 
 **输出：**
 - `masks`：所有帧的跟踪分割遮罩
 - `session_id`：用于恢复跟踪的会话 ID
+- `objects`：对象跟踪信息和元数据
 
 ### 4. SAM3 视频模型额外配置
-配置视频分割的高级参数。
+配置视频分割的高级参数，以微调跟踪行为。
 
-**主要参数：**
-- `assoc_iou_thresh`：检测到跟踪匹配的 IoU 阈值
-- `trk_assoc_iou_thresh`：不匹配掩码的更严格 IoU 阈值
-- `hotstart_delay`：延迟输出以移除不匹配/重复的轨迹
-- `max_trk_keep_alive`：没有检测时保持跟踪活动的最大帧数
-- `det_nms_thresh`：NMS 的 IoU 阈值
-- `fill_hole_area`：填充遮罩中小于此面积的孔洞
-- `max_num_objects`：要跟踪的最大对象数
-- 还有更多微调选项...
+**参数：**
+- `assoc_iou_thresh`：检测到跟踪匹配的 IoU 阈值（0.0-1.0，默认：0.1）
+- `det_nms_thresh`：检测 NMS 的 IoU 阈值（0.0-1.0，默认：0.1）
+- `new_det_thresh`：添加新对象的阈值（0.0-1.0，默认：0.7）
+- `hotstart_delay`：延迟 N 帧输出以移除不匹配/重复的轨迹（0-100，默认：15）
+- `hotstart_unmatch_thresh`：在热启动期间移除未匹配此帧数的轨迹（0-100，默认：8）
+- `hotstart_dup_thresh`：在热启动期间移除重叠的轨迹（0-100，默认：8）
+- `suppress_unmatched_within_hotstart`：仅在热启动期间抑制未匹配的遮罩（默认：True）
+- `min_trk_keep_alive`：最小保持活动值（-100-0，默认：-1，负值表示立即移除）
+- `max_trk_keep_alive`：没有检测时保持跟踪活动的最大帧数（0-100，默认：30）
+- `init_trk_keep_alive`：创建新跟踪时的初始保持活动值（-10-100，默认：30）
+- `suppress_overlap_occlusion_thresh`：基于近期遮挡抑制重叠对象的阈值（0.0-1.0，默认：0.7，0.0 表示禁用）
+- `suppress_det_at_boundary`：抑制接近图像边界的检测（默认：False）
+- `fill_hole_area`：填充遮罩中小于此面积（像素）的孔洞（0-1000，默认：16）
+- `recondition_every_nth_frame`：每 N 帧重新调整跟踪（-1-1000，默认：16，-1 表示禁用）
+- `enable_masklet_confirmation`：启用掩码确认以抑制未确认的轨迹（默认：False）
+- `decrease_alive_for_empty_masks`：减少空掩码的保持活动计数器（默认：False）
+- `image_size`：模型的输入图像大小（256-2048，步长：8，默认：1008）
 
 **输出：**
 - `extra_config`：视频分割节点的配置字典

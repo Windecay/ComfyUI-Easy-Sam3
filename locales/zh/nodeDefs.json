@@ -51,6 +51,22 @@
       "add_background": {
         "name": "添加背景",
         "tooltip": "为分割的图像添加背景颜色"
+      },
+      "coordinates_positive": {
+        "name": "正向坐标",
+        "tooltip": "用于细化的正向点击坐标"
+      },
+      "coordinates_negative": {
+        "name": "负向坐标",
+        "tooltip": "用于细化的负向点击坐标"
+      },
+      "bboxes": {
+        "name": "边界框",
+        "tooltip": "用于对象检测的边界框"
+      },
+      "mask": {
+        "name": "遮罩",
+        "tooltip": "用于细化的输入遮罩"
       }
     },
     "outputs": {
@@ -61,6 +77,14 @@
       "1": {
         "name": "图像",
         "tooltip": "分割图像"
+      },
+      "2": {
+        "name": "边界框",
+        "tooltip": "检测到的边界框"
+      },
+      "3": {
+        "name": "分数",
+        "tooltip": "检测置信度分数"
       }
     }
   },
@@ -83,6 +107,14 @@
         "name": "提示词",
         "tooltip": "要跟踪的对象的文本描述（例如：'人'、'汽车'）"
       },
+      "frame_index": {
+        "name": "帧索引",
+        "tooltip": "应用初始提示词的帧"
+      },
+      "object_id": {
+        "name": "对象 ID",
+        "tooltip": "多对象跟踪的唯一 ID"
+      },
       "score_threshold_detection": {
         "name": "检测分数阈值",
         "tooltip": "检测的置信度阈值，默认为 0.5"
@@ -91,33 +123,41 @@
         "name": "新检测阈值",
         "tooltip": "将检测添加为新对象的阈值，默认为 0.7"
       },
-      "object_frame_index": {
-        "name": "对象帧索引",
-        "tooltip": "开始跟踪的对象帧索引"
-      },
-      "object_id": {
-        "name": "对象 ID",
-        "tooltip": "要跟踪的对象 ID（1-100）"
-      },
-      "start_to_propagate": {
-        "name": "开始传播",
-        "tooltip": "传播方向：禁用、双向、前向或后向"
+      "propagation_direction": {
+        "name": "传播方向",
+        "tooltip": "传播方向：双向、前向或后向"
       },
       "start_frame_index": {
         "name": "起始帧索引",
         "tooltip": "开始传播的帧索引"
       },
-      "keep_model_loaded": {
-        "name": "保持模型加载",
-        "tooltip": "推理后将模型保留在显存中"
+      "max_frames_to_track": {
+        "name": "最大跟踪帧数",
+        "tooltip": "高级：要处理的最大帧数（-1 表示全部）"
       },
       "close_after_propagation": {
         "name": "传播后关闭",
         "tooltip": "传播后关闭会话"
       },
+      "keep_model_loaded": {
+        "name": "保持模型加载",
+        "tooltip": "推理后将模型保留在显存中"
+      },
       "extra_config": {
         "name": "额外配置",
         "tooltip": "SAM3 模型的额外配置"
+      },
+      "positive_coords": {
+        "name": "正向坐标",
+        "tooltip": "正向点击坐标，JSON 格式：'[{\"x\": 50, \"y\": 120}]'"
+      },
+      "negative_coords": {
+        "name": "负向坐标",
+        "tooltip": "负向点击坐标，JSON 格式：'[{\"x\": 150, \"y\": 300}]'"
+      },
+      "bbox": {
+        "name": "边界框",
+        "tooltip": "边界框，格式为 (x_min, y_min, x_max, y_max) 或 (x, y, width, height) 元组。兼容 KJNodes Points Editor bbox 输出。"
       }
     },
     "outputs": {
@@ -128,6 +168,10 @@
       "1": {
         "name": "会话 ID",
         "tooltip": "用于恢复跟踪的会话 ID"
+      },
+      "2": {
+        "name": "对象",
+        "tooltip": "跟踪对象输出数据"
       }
     }
   },
@@ -174,6 +218,10 @@
         "name": "检测 NMS 阈值",
         "tooltip": "检测 NMS（非极大值抑制）的 IoU 阈值"
       },
+      "new_det_thresh": {
+        "name": "新检测阈值",
+        "tooltip": "将检测添加为新对象的阈值"
+      },
       "suppress_overlap_occlusion_thresh": {
         "name": "抑制重叠遮挡阈值",
         "tooltip": "基于最近遮挡抑制重叠对象的阈值（0.0 禁用）"
@@ -209,6 +257,10 @@
       "masklet_confirm_frames": {
         "name": "掩码确认帧数",
         "tooltip": "掩码确认所需的帧数"
+      },
+      "image_size": {
+        "name": "图像尺寸",
+        "tooltip": "模型的输入图像尺寸"
       }
     },
     "outputs": {

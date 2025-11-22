@@ -51,6 +51,22 @@
       "add_background": {
         "name": "add_background",
         "tooltip": "Add background color to segmented images"
+      },
+      "coordinates_positive": {
+        "name": "coordinates_positive",
+        "tooltip": "Positive click coordinates for refinement"
+      },
+      "coordinates_negative": {
+        "name": "coordinates_negative",
+        "tooltip": "Negative click coordinates for refinement"
+      },
+      "bboxes": {
+        "name": "bboxes",
+        "tooltip": "Bounding boxes for object detection"
+      },
+      "mask": {
+        "name": "mask",
+        "tooltip": "Input mask for refinement"
       }
     },
     "outputs": {
@@ -61,6 +77,14 @@
       "1": {
         "name": "images",
         "tooltip": "Segmentation images"
+      },
+      "2": {
+        "name": "boxes",
+        "tooltip": "Detected bounding boxes"
+      },
+      "3": {
+        "name": "scores",
+        "tooltip": "Detection confidence scores"
       }
     }
   },
@@ -83,6 +107,14 @@
         "name": "prompt",
         "tooltip": "Text description of objects to track (e.g., 'person', 'car')"
       },
+      "frame_index": {
+        "name": "frame_index",
+        "tooltip": "Frame where initial prompt is applied"
+      },
+      "object_id": {
+        "name": "object_id",
+        "tooltip": "Unique ID for multi-object tracking"
+      },
       "score_threshold_detection": {
         "name": "score_threshold_detection",
         "tooltip": "Confidence threshold for detections, default is 0.5"
@@ -91,33 +123,41 @@
         "name": "new_det_thresh",
         "tooltip": "Threshold for a detection to be added as a new object, default is 0.7"
       },
-      "object_frame_index": {
-        "name": "object_frame_index",
-        "tooltip": "Object Frame index to start tracking from"
-      },
-      "object_id": {
-        "name": "object_id",
-        "tooltip": "Object ID to track (1-100)"
-      },
-      "start_to_propagate": {
-        "name": "start_to_propagate",
-        "tooltip": "Propagation direction: disabled, both, forward, or backward"
+      "propagation_direction": {
+        "name": "propagation_direction",
+        "tooltip": "Propagation direction: both, forward, or backward"
       },
       "start_frame_index": {
         "name": "start_frame_index",
         "tooltip": "Frame index to start propagation from"
       },
-      "keep_model_loaded": {
-        "name": "keep_model_loaded",
-        "tooltip": "Keep model in VRAM after inference"
+      "max_frames_to_track": {
+        "name": "max_frames_to_track",
+        "tooltip": "Advanced: Max frames to process (-1 for all)"
       },
       "close_after_propagation": {
         "name": "close_after_propagation",
         "tooltip": "Close the session after propagation"
       },
+      "keep_model_loaded": {
+        "name": "keep_model_loaded",
+        "tooltip": "Keep model in VRAM after inference"
+      },
       "extra_config": {
         "name": "extra_config",
         "tooltip": "Extra configuration for the SAM3 model"
+      },
+      "positive_coords": {
+        "name": "positive_coords",
+        "tooltip": "Positive click coordinates as JSON: '[{\"x\": 50, \"y\": 120}]'"
+      },
+      "negative_coords": {
+        "name": "negative_coords",
+        "tooltip": "Negative click coordinates as JSON: '[{\"x\": 150, \"y\": 300}]'"
+      },
+      "bbox": {
+        "name": "bbox",
+        "tooltip": "Bounding box as (x_min, y_min, x_max, y_max) or (x, y, width, height) tuple. Compatible with KJNodes Points Editor bbox output."
       }
     },
     "outputs": {
@@ -128,6 +168,10 @@
       "1": {
         "name": "session_id",
         "tooltip": "Session ID for resuming tracking"
+      },
+      "2": {
+        "name": "objects",
+        "tooltip": "Tracked objects output data"
       }
     }
   },
@@ -174,6 +218,10 @@
         "name": "det_nms_thresh",
         "tooltip": "IoU threshold for detection NMS (Non-Maximum Suppression)"
       },
+      "new_det_thresh": {
+        "name": "new_det_thresh",
+        "tooltip": "Threshold for a detection to be added as a new object"
+      },
       "suppress_overlap_occlusion_thresh": {
         "name": "suppress_overlap_occlusion_thresh",
         "tooltip": "Threshold for suppressing overlapping objects based on recent occlusion (0.0 to disable)"
@@ -209,6 +257,10 @@
       "masklet_confirm_frames": {
         "name": "masklet_confirm_frames",
         "tooltip": "Frames needed for masklet confirmation"
+      },
+      "image_size": {
+        "name": "image_size",
+        "tooltip": "Input image size for the model"
       }
     },
     "outputs": {

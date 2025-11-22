@@ -309,18 +309,6 @@ def _create_sam3_model(
     }
 
     matcher = None
-    if not eval_mode:
-        from .train.matcher import BinaryHungarianMatcherV2
-
-        matcher = BinaryHungarianMatcherV2(
-            focal=True,
-            cost_class=2.0,
-            cost_bbox=5.0,
-            cost_giou=2.0,
-            alpha=0.25,
-            gamma=2,
-            stable=False,
-        )
     common_params["matcher"] = matcher
     model = Sam3Image(**common_params)
 

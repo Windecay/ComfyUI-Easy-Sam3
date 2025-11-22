@@ -13,7 +13,7 @@ from PIL import Image
 from typing import Tuple, Any
 from comfy_api.latest import ComfyExtension, io
 from .sam3.logger import get_logger
-from .utils import tensor_to_pil, pil_to_tensor, masks_to_tensor, join_image_with_alpha
+from .utils import tensor_to_pil, pil_to_tensor, masks_to_tensor, join_image_with_alpha, parse_points, parse_bbox
 
 logger = get_logger(__name__)
 
@@ -40,6 +40,7 @@ class LoadSam3Model(io.ComfyNode):
                 io.Combo.Input(
                     "model",
                     options=folder_paths.get_filename_list("sam3"),
+                    default="sam3.pt",
                     tooltip="Select SAM3 model file to load"
                 ),
                 io.Combo.Input(
@@ -78,6 +79,9 @@ class LoadSam3Model(io.ComfyNode):
         if model_path is None:
             raise ValueError(f"Model file '{model}' not found in sam3 folder")
 
+        if "fp16" in model.lower():
+            precision = "fp16"
+
         # Build model based on segmentor type
         if segmentor == "image":
             from .sam3.model.sam3_image_processor import Sam3Processor
@@ -107,6 +111,14 @@ class LoadSam3Model(io.ComfyNode):
 
         logger.info("Sam3 Model loaded successfully")
 
+        if precision != 'fp32' and device == 'cpu':
+            raise ValueError("fp16 and bf16 are not supported on cpu")
+
+        if device == "cuda":
+            if torch.cuda.get_device_properties(0).major >= 8:
+                # turn on tfloat32 for Ampere GPUs (https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices)
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
         dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
         device = {"cuda": torch.device("cuda"), "cpu": torch.device("cpu"), "mps": torch.device("mps")}[device]
 
@@ -149,7 +161,7 @@ class Sam3ImageSegmentation(io.ComfyNode):
                 ),
                 io.Float.Input(
                     "threshold",
-                    default=0.60,
+                    default=0.40,
                     min=0.0,
                     max=1.0,
                     step=0.05,
@@ -164,33 +176,29 @@ class Sam3ImageSegmentation(io.ComfyNode):
                     options=["none", "black", "white", "grey"],
                     default="none",
                     tooltip="Add background color to segmented images"
-                )
-                # io.String.Input(
-                #     "coordinates_positive",
-                #     display_name="coordinates_positive",
-                #     optional=True,
-                #     force_input=True,
-                # ),
-                # io.String.Input(
-                #     "coordinates_negative",
-                #     display_name="coordinates_negative",
-                #     optional=True,
-                #     force_input=True,
-                # ),
-                # io.BBOX.Input(
-                #     "bboxes",
-                #     display_name="bboxes",
-                #     optional=True,
-                # ),
-                # io.Mask.Input(
-                #     "mask",
-                #     display_name="mask",
-                #     optional=True,
-                # ),
-                # io.Boolean.Input(
-                #     "enable_visualize",
-                #     default=False,
-                # ),
+                ),
+                io.String.Input(
+                    "coordinates_positive",
+                    display_name="coordinates_positive",
+                    optional=True,
+                    force_input=True,
+                ),
+                io.String.Input(
+                    "coordinates_negative",
+                    display_name="coordinates_negative",
+                    optional=True,
+                    force_input=True,
+                ),
+                io.BBOX.Input(
+                    "bboxes",
+                    display_name="bboxes",
+                    optional=True,
+                ),
+                io.Mask.Input(
+                    "mask",
+                    display_name="mask",
+                    optional=True,
+                ),
             ],
             outputs=[
                 io.Mask.Output(
@@ -205,12 +213,16 @@ class Sam3ImageSegmentation(io.ComfyNode):
                     is_output_list=True,
                     tooltip="Segmentation images",
                 ),
-                # io.Image.Output(
-                #     "visualization",
-                #     display_name="visualization",
-                #     is_output_list=True,
-                #     tooltip="When enable_visualize is True, the visualized image is output, otherwise the original image is output.",
-                # )
+                io.String.Output(
+                    "boxes",
+                    display_name="boxes",
+                    is_output_list=True,
+                ),
+                io.String.Output(
+                    "scores",
+                    display_name="scores",
+                    is_output_list=True,
+                ),
             ]
         )
 
@@ -232,56 +244,36 @@ class Sam3ImageSegmentation(io.ComfyNode):
         # set confidence threshold
         processor.set_confidence_threshold(threshold)
 
-        # Todo: support for points and bbox prompts
-        
-        # # handle point coordinates
-        # if coordinates_positive is not None:
-        #     try:
-        #         coordinates_positive = json.loads(coordinates_positive.replace("'", '"'))
-        #         coordinates_positive = [(coord['x'], coord['y']) for coord in coordinates_positive]
-        #         if coordinates_negative is not None:
-        #             coordinates_negative = json.loads(coordinates_negative.replace("'", '"'))
-        #             coordinates_negative = [(coord['x'], coord['y']) for coord in coordinates_negative]
-        #     except:
-        #         pass
+        # Parse inputs with bounds checking
+        pos_points, pos_count, pos_errors = parse_points(coordinates_positive, images.shape)
+        neg_points, neg_count, neg_errors = parse_points(coordinates_negative, images.shape)
+        # Combine points for refinement
+        points = None
+        point_labels = None
+        if pos_points is not None and neg_points is not None:
+            points = pos_points + neg_points
+            point_labels = [1] * pos_count + [0] * neg_count
+        elif pos_points is not None:
+            points = pos_points
+            point_labels = [1] * pos_count
+        elif neg_points is not None:
+            points = neg_points
+            point_labels = [0] * neg_count
 
-        #     positive_point_coords = np.atleast_2d(np.array(coordinates_positive))
+        # bbox
+        bounding_boxes = None
+        bounding_box_labels = None
+        if bboxes is not None:
+            bbox_coords, bbox_count = parse_bbox(bboxes, images.shape)
+            if bbox_coords is not None:
+                bounding_boxes = bbox_coords
+                bounding_box_labels = [1] * bbox_count
 
-        #     if coordinates_negative is not None:
-        #         negative_point_coords = np.array(coordinates_negative)
-        #         # Ensure both positive and negative coords are lists of 2D arrays if individual_objects is True
-        #         final_coords = np.concatenate((positive_point_coords, negative_point_coords), axis=0)
-        #     else:
-        #         final_coords = positive_point_coords
-
-        # # Handle possible bboxes
-        # if bboxes is not None:
-        #     boxes_np_batch = []
-        #     for bbox_list in bboxes:
-        #         boxes_np = []
-        #         for bbox in bbox_list:
-        #             boxes_np.append(bbox)
-        #         boxes_np = np.array(boxes_np)
-        #         boxes_np_batch.append(boxes_np)
-        #     final_box = np.array(boxes_np)
-        #     final_labels = None
-
-        # # handle labels
-        # if coordinates_positive is not None:
-        #     positive_point_labels = np.ones(len(positive_point_coords))
-
-        #     if coordinates_negative is not None:
-        #         negative_point_labels = np.zeros(len(negative_point_coords))  # 0 = negative
-        #         final_labels = np.concatenate((positive_point_labels, negative_point_labels), axis=0)
-        #     else:
-        #         final_labels = positive_point_labels
-        #     print("combined labels: ", final_labels)
-        #     print("combined labels shape: ", final_labels.shape)
-
-        # mask_list = []
 
         # Switch model to main device
         model.to(device)
+        if mask is not None:
+            mask.to(device)
 
         autocast_condition = not mm.is_device_mps(device)
         with torch.autocast(mm.get_autocast_device(device), dtype=dtype) if autocast_condition else nullcontext():
@@ -293,6 +285,8 @@ class Sam3ImageSegmentation(io.ComfyNode):
             # Process each image separately to maintain correspondence
             output_masks = []
             output_images = []
+            output_boxes = []
+            output_scores = []
 
             # Initialize progress bar
 
@@ -308,7 +302,15 @@ class Sam3ImageSegmentation(io.ComfyNode):
                 if prompt_text:
                     state = processor.set_text_prompt(prompt_text, state)
 
-                # TODO: Add support for points and bbox prompts
+                # points
+                if points is not None and len(points) > 0:
+                    state = processor.add_point_prompt(points, point_labels, state)
+                # bbox
+                if bounding_boxes is not None and len(bounding_boxes) > 0:
+                    state = processor.add_multiple_box_prompts(bounding_boxes, bounding_box_labels, state)
+                # mask
+                if mask is not None:
+                    state = processor.add_mask_prompt(mask, state)
 
                 # Get the masks and scores for this image
                 masks = state.get('masks', None)
@@ -345,7 +347,7 @@ class Sam3ImageSegmentation(io.ComfyNode):
                 img_tensor = pil_to_tensor(pil_img)
                 mask_tensor = combined_mask.unsqueeze(0)
                 rgba_image, = join_image_with_alpha(img_tensor, mask_tensor, False)
-                
+
                 if add_background != "none":
                     if add_background == "black":
                         bg_color = torch.zeros_like(rgba_image[:, :, :, :3])
@@ -353,26 +355,17 @@ class Sam3ImageSegmentation(io.ComfyNode):
                         bg_color = torch.ones_like(rgba_image[:, :, :, :3])
                     elif add_background == "grey":
                         bg_color = torch.ones_like(rgba_image[:, :, :, :3]) * 0.5
-                    
+
                     rgb = rgba_image[:, :, :, :3]
                     alpha = rgba_image[:, :, :, 3:4]
-                    
+
                     composited = rgb * alpha + bg_color * (1 - alpha)
                     output_images.append([composited.squeeze(0)])
                 else:
                     output_images.append([rgba_image.squeeze(0)])
 
-                # Visualization: overlay mask on original image with color
-                # if enable_visualize:
-                #     vis_image = visualize_masks_on_image(
-                #         pil_img,
-                #         combined_mask,
-                #         boxes,
-                #         scores,
-                #         alpha=0.5
-                #     )
-                #     vis_tensor = pil_to_tensor(vis_image)
-                #     output_visualizations.append(vis_tensor)
+                output_boxes.append(boxes)
+                output_scores.append(scores)
 
                 # Update progress bar
                 processed_frames += 1
@@ -386,7 +379,7 @@ class Sam3ImageSegmentation(io.ComfyNode):
                 model.to(offload_device)
                 mm.soft_empty_cache()
 
-        return io.NodeOutput(output_masks, output_images)
+        return io.NodeOutput(output_masks, output_images, output_boxes, output_scores)
 
 
 class Sam3VideoSegmentation(io.ComfyNode):
@@ -425,6 +418,15 @@ class Sam3VideoSegmentation(io.ComfyNode):
                     min=0,
                     max=10 ** 5,
                     step=1,
+                    tooltip="Frame where initial prompt is applied",
+                ),
+                io.Int.Input(
+                    "object_id",
+                    default=1,
+                    min=1,
+                    max=1000,
+                    step=1,
+                    tooltip="Unique ID for multi-object tracking"
                 ),
                 io.Float.Input(
                     "score_threshold_detection",
@@ -454,6 +456,12 @@ class Sam3VideoSegmentation(io.ComfyNode):
                     max=10**5,
                     step=1,
                 ),
+                io.Int.Input(
+                    "max_frames_to_track",
+                    default=-1,
+                    min=-1,
+                    tooltip="Advanced: Max frames to process (-1 for all)"
+                ),
                 io.Boolean.Input(
                     "close_after_propagation",
                     default=True,
@@ -469,28 +477,26 @@ class Sam3VideoSegmentation(io.ComfyNode):
                     tooltip="Extra configuration for the SAM3 model",
                     optional=True,
                 ),
-                # io.String.Input(
-                #     "coordinates_positive",
-                #     display_name="coordinates_positive",
-                #     optional=True,
-                #     force_input=True,
-                # ),
-                # io.String.Input(
-                #     "coordinates_negative",
-                #     display_name="coordinates_negative",
-                #     optional=True,
-                #     force_input=True,
-                # ),
-                # io.BBOX.Input(
-                #     "bboxes",
-                #     display_name="bboxes",
-                #     optional=True,
-                # ),
-                # io.Mask.Input(
-                #     "mask",
-                #     display_name="mask",
-                #     optional=True,
-                # )
+                io.String.Input(
+                  "positive_coords",
+                  display_name="positive_coords",
+                  tooltip="Positive click coordinates as JSON: '[{\"x\": 50, \"y\": 120}]'",
+                  optional=True,
+                  force_input=True,
+                ),
+                io.String.Input(
+                    "negative_coords",
+                    display_name="negative_coords",
+                    tooltip="Negative click coordinates as JSON: '[{\"x\": 150, \"y\": 300}]'",
+                    optional=True,
+                    force_input=True,
+                ),
+                io.BBOX.Input(
+                    "bbox",
+                    display_name="bbox",
+                    optional=True,
+                    tooltip="Bounding box as (x_min, y_min, x_max, y_max) or (x, y, width, height) tuple. Compatible with KJNodes Points Editor bbox output."
+                ),
             ],
             outputs=[
                 io.Mask.Output(
@@ -511,8 +517,8 @@ class Sam3VideoSegmentation(io.ComfyNode):
 
 
     @classmethod
-    def execute(cls, sam3_model, video_frames, prompt, frame_index, score_threshold_detection, new_det_thresh, propagation_direction, start_frame_index=0,close_after_propagation=True,  keep_model_loaded=False, session_id=None, extra_config=None,coordinates_positive=None, coordinates_negative=None,
-                 bboxes=None, mask=None) -> io.NodeOutput:
+    def execute(cls, sam3_model, video_frames, prompt, frame_index, object_id, score_threshold_detection, new_det_thresh, propagation_direction, start_frame_index=0, max_frames_to_track=-1, close_after_propagation=True,  keep_model_loaded=False, session_id=None, extra_config=None, positive_coords=None, negative_coords=None,
+                 bbox=None,) -> io.NodeOutput:
         offload_device = mm.unet_offload_device()
 
         video_predictor = sam3_model.get("model", None)
@@ -523,6 +529,10 @@ class Sam3VideoSegmentation(io.ComfyNode):
 
         if video_predictor is None or segmentor != "video":
             raise ValueError("Invalid SAM3 model. Please load a SAM3 model in 'video' mode")
+
+        if frame_index > B - 1:
+            logger.info(f"Frame index {frame_index} is out of bounds, setting to last frame {B - 1}")
+            frame_index = B - 1
 
         # Set video model config
         video_predictor.model.score_threshold_detection = score_threshold_detection
@@ -574,14 +584,46 @@ class Sam3VideoSegmentation(io.ComfyNode):
         video_predictor.model.to(device)
 
         autocast_condition = not mm.is_device_mps(device)
-        with torch.autocast(mm.get_autocast_device(device), dtype=dtype) if autocast_condition else nullcontext(): 
+        with torch.autocast(mm.get_autocast_device(device), dtype=dtype) if autocast_condition else nullcontext():
+
+            # Parse inputs with bounds checking
+            pos_points, pos_count, pos_errors = parse_points(positive_coords, video_frames.shape)
+            neg_points, neg_count, neg_errors = parse_points(negative_coords, video_frames.shape)
+            # Combine points for refinement
+            points = None
+            point_labels = None
+            if pos_points is not None and neg_points is not None:
+                points = pos_points + neg_points
+                point_labels = [1] * pos_count + [0] * neg_count
+            elif pos_points is not None:
+                points = pos_points
+                point_labels = [1] * pos_count
+            elif neg_points is not None:
+                points = neg_points
+                point_labels = [0] * neg_count
+
+            # bbox (has bugs)
+            bounding_boxes = None
+            bounding_box_labels = None
+            if bbox is not None:
+                bbox_coords, bbox_count = parse_bbox(bbox, video_frames.shape)
+                if bbox_coords is not None:
+                    bounding_boxes = bbox_coords
+                    bounding_box_labels = [1] * bbox_count
+
+            # print('bbox_coords:', bbox_coords)
             # Add Prompt
             response = video_predictor.handle_request(
                 request=dict(
                     type="add_prompt",
                     session_id=session_id,
                     frame_index=frame_index,
-                    text=prompt,
+                    text=prompt if prompt else None,
+                    bounding_boxes=bounding_boxes,
+                    bounding_box_labels=bounding_box_labels,
+                    points=points,
+                    point_labels=point_labels,
+                    obj_id=object_id
                 )
             )
 
@@ -603,6 +645,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
                     session_id=session_id,
                     propagation_direction=propagation_direction,
                     start_frame_index=start_frame_index,
+                    max_frame_num_to_track=max_frames_to_track if max_frames_to_track != -1 else None,
                 )
             ):
                 frame_idx = response.get("frame_index", 0)

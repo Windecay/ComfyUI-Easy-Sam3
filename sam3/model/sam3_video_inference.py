@@ -84,7 +84,7 @@ class Sam3VideoInference(Sam3VideoBase):
         inference_state["feature_cache"] = {}
         inference_state["cached_frame_outputs"] = {}
         inference_state["action_history"] = []  # for logging user actions
-        inference_state["is_image_only"] = is_image_type(resource_path) if resource_path else False
+        inference_state["is_image_only"] = is_image_type(resource_path)
         return inference_state
 
     @torch.inference_mode()
@@ -1154,6 +1154,12 @@ class Sam3VideoInferenceWithInstanceInteractivity(Sam3VideoInference):
                         )  # (1, H_video, W_video) bool
                         refined_obj_id_to_mask[obj_id] = refined_mask_video_res
 
+                    # Initialize cache if not present (needed for point prompts during propagation)
+                    if "cached_frame_outputs" not in inference_state:
+                        inference_state["cached_frame_outputs"] = {}
+                    if frame_idx not in inference_state["cached_frame_outputs"]:
+                        inference_state["cached_frame_outputs"][frame_idx] = {}
+
                     obj_id_to_mask = self._build_tracker_output(
                         inference_state, frame_idx, refined_obj_id_to_mask
                     )
@@ -1575,6 +1581,12 @@ class Sam3VideoInferenceWithInstanceInteractivity(Sam3VideoInference):
             new_mask_data = data_list[0].to(self.device)
 
         if self.rank == 0:
+            # Initialize cache if not present (needed for point prompts without prior propagation)
+            if "cached_frame_outputs" not in inference_state:
+                inference_state["cached_frame_outputs"] = {}
+            if frame_idx not in inference_state["cached_frame_outputs"]:
+                inference_state["cached_frame_outputs"][frame_idx] = {}
+
             obj_id_to_mask = self._build_tracker_output(
                 inference_state,
                 frame_idx,

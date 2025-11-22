@@ -4,6 +4,7 @@ Utility functions for tensor and PIL image conversions.
 
 import numpy as np
 import torch
+import json
 from PIL import Image
 from typing import List, Union, Optional
 
@@ -229,3 +230,215 @@ def join_image_with_alpha(image: torch.Tensor, alpha: torch.Tensor, invert=False
         out_images.append(torch.cat((image[i][:,:,:3], alpha[i].unsqueeze(2)), dim=2))
 
     return torch.stack(out_images),
+
+def parse_points(points_str, image_shape=None):
+    """Parse point coordinates from JSON string and validate bounds.
+    
+    Converts pixel coordinates to normalized coordinates (0-1 range) if image_shape is provided.
+
+    Returns:
+        tuple: (points_array, labels_array, validation_errors) where validation_errors
+               is a list of error messages, or (None, None, errors) if all points invalid
+    """
+    if not points_str or not points_str.strip():
+        return None, None, []
+
+    try:
+        points_list = json.loads(points_str)
+
+        if not isinstance(points_list, list):
+            raise ValueError(f"Points must be a JSON array, got {type(points_list).__name__}")
+
+        if len(points_list) == 0:
+            return None, None, []
+
+        points = []
+        validation_errors = []
+
+        for i, point_dict in enumerate(points_list):
+            if not isinstance(point_dict, dict):
+                err = f"Point {i} is not a dictionary"
+                print(f"Warning: {err}, skipping")
+                validation_errors.append(err)
+                continue
+
+            if 'x' not in point_dict or 'y' not in point_dict:
+                err = f"Point {i} missing 'x' or 'y' key"
+                print(f"Warning: {err}, skipping")
+                validation_errors.append(err)
+                continue
+
+            try:
+                x = float(point_dict['x'])
+                y = float(point_dict['y'])
+
+                # Validate coordinates are non-negative
+                if x < 0 or y < 0:
+                    err = f"Point {i} has negative coordinates ({x}, {y})"
+                    print(f"Warning: {err}, skipping")
+                    validation_errors.append(err)
+                    continue
+
+                # Normalize to 0-1 range if image shape is provided
+                if image_shape is not None:
+                    height, width = image_shape[1], image_shape[2]  # [batch, height, width, channels]
+                    
+                    # Validate within image bounds
+                    if x >= width or y >= height:
+                        err = f"Point {i} ({x}, {y}) outside image bounds ({width}x{height})"
+                        print(f"Warning: {err}, skipping")
+                        validation_errors.append(err)
+                        continue
+                    
+                    # Normalize coordinates to [0, 1] range
+                    x = x / width
+                    y = y / height
+
+                points.append([x, y])
+
+            except (ValueError, TypeError) as e:
+                err = f"Could not convert point {i} coordinates to float: {e}"
+                print(f"Warning: {err}, skipping")
+                validation_errors.append(err)
+                continue
+
+        if not points:
+            return None, None, validation_errors
+
+        return points, len(points), validation_errors
+
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in points: {str(e)}")
+    except Exception as e:
+        print(f"Error parsing points: {e}")
+        return None, None, [str(e)]
+
+def parse_bbox(bbox, image_shape=None):
+    """Parse bounding box from BBOX type (tuple/list/dict) and validate
+    
+    Converts pixel coordinates to normalized coordinates (0-1 range) if image_shape is provided.
+
+    Supports multiple formats:
+    - KJNodes: [{'startX': x, 'startY': y, 'endX': x2, 'endY': y2}, ...]
+    - Tuple/list: (x1, y1, x2, y2) or (x, y, width, height)
+    - Dict: {'startX': x, 'startY': y, 'endX': x2, 'endY': y2}
+    
+    Returns:
+        List of bounding boxes [[x1, y1, x2, y2], ...] in normalized coordinates (0-1) if image_shape provided, or None
+    """
+    if bbox is None:
+        return None
+
+    try:
+        all_coords = []
+
+        # Try to extract coordinates regardless of type checks
+        # This handles cases where ComfyUI wraps data in unexpected ways
+        if hasattr(bbox, '__iter__') and not isinstance(bbox, (str, bytes)):
+            # It's some kind of sequence
+            try:
+                bbox_list = list(bbox)
+
+                if len(bbox_list) == 0:
+                    return None
+
+                # Check if it's a list of 4 numbers (single bbox)
+                if len(bbox_list) == 4 and all(isinstance(x, (int, float)) for x in bbox_list):
+                    coords = [float(x) for x in bbox_list]
+                    all_coords.append(coords)
+                else:
+                    # Process each element as a potential bbox
+                    for elem in bbox_list:
+                        coords = None
+                        
+                        # Try to access as dict-like (KJNodes format)
+                        if hasattr(elem, '__getitem__'):
+                            try:
+                                x1 = float(elem['startX'])
+                                y1 = float(elem['startY'])
+                                x2 = float(elem['endX'])
+                                y2 = float(elem['endY'])
+                                coords = [x1, y1, x2, y2]
+                            except (KeyError, TypeError):
+                                # Not dict format, might be numeric sequence
+                                pass
+                        
+                        # If still no coords, try as numeric sequence
+                        if coords is None:
+                            if hasattr(elem, '__iter__') and not isinstance(elem, (str, bytes)):
+                                inner = list(elem)
+                                if len(inner) == 4:
+                                    coords = [float(x) for x in inner]
+                        
+                        if coords is not None:
+                            all_coords.append(coords)
+
+            except Exception as e:
+                raise ValueError(f"Failed to process bbox as sequence: {e}")
+
+        # Try single dict format
+        elif hasattr(bbox, '__getitem__'):
+            try:
+                x1 = float(bbox['startX'])
+                y1 = float(bbox['startY'])
+                x2 = float(bbox['endX'])
+                y2 = float(bbox['endY'])
+                coords = [x1, y1, x2, y2]
+                all_coords.append(coords)
+            except (KeyError, TypeError) as e:
+                raise ValueError(f"Dictionary bbox missing required keys: {e}")
+
+        else:
+            raise ValueError(f"Unsupported bbox type: {type(bbox)}")
+
+        if not all_coords:
+            raise ValueError(
+                f"Could not extract coordinates from bbox. Type: {type(bbox)}, Content: {repr(bbox)[:200]}")
+
+        # Process and validate each bbox
+        validated_coords = []
+        for coords in all_coords:
+            # Handle xywh format (convert to xyxy)
+            x1, y1, x2, y2 = coords
+            if x2 < x1 or y2 < y1:
+                # Assume xywh format: (x, y, width, height)
+                width, height = x2, y2
+                x2 = x1 + width
+                y2 = y1 + height
+                coords = [x1, y1, x2, y2]
+
+            # Validate coordinates
+            if coords[0] >= coords[2]:
+                raise ValueError(f"Invalid bbox: x1 ({coords[0]}) must be < x2 ({coords[2]})")
+            if coords[1] >= coords[3]:
+                raise ValueError(f"Invalid bbox: y1 ({coords[1]}) must be < y2 ({coords[3]})")
+            if coords[0] < 0 or coords[1] < 0:
+                raise ValueError(f"Bounding box coordinates must be non-negative, got x1={coords[0]}, y1={coords[1]}")
+            
+            # Normalize to 0-1 range if image shape is provided
+            if image_shape is not None:
+                height, width = image_shape[1], image_shape[2]  # [batch, height, width, channels]
+                
+                # Validate within image bounds
+                if coords[0] >= width or coords[2] > width:
+                    print(f"Warning: bbox x coordinates ({coords[0]}, {coords[2]}) outside image width ({width})")
+                if coords[1] >= height or coords[3] > height:
+                    print(f"Warning: bbox y coordinates ({coords[1]}, {coords[3]}) outside image height ({height})")
+                
+                # Normalize coordinates to [0, 1] range
+                coords = [
+                    coords[0] / width,   # x1
+                    coords[1] / height,  # y1
+                    coords[2] / width,   # x2
+                    coords[3] / height   # y2
+                ]
+            
+            validated_coords.append(coords)
+
+        return validated_coords, len(validated_coords)
+
+    except (ValueError, TypeError) as e:
+        error_msg = f"Invalid bbox: {str(e)}\n"
+        error_msg += f"Input type: {type(bbox)}\n"
+        error_msg += f"Input content: {repr(bbox)[:500]}"
+        raise ValueError(error_msg)

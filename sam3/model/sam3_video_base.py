@@ -966,12 +966,13 @@ class Sam3VideoBase(nn.Module):
         # Part 2: masks from new detections
         new_det_fa_inds_t = torch.from_numpy(new_det_fa_inds)
         new_det_low_res_masks = det_out["mask"][new_det_fa_inds_t].unsqueeze(1)
-        new_det_low_res_masks = fill_holes_in_mask_scores(
-            new_det_low_res_masks,
-            max_area=self.fill_hole_area,
-            fill_holes=True,
-            remove_sprinkles=True,
-        )
+        if len(new_det_fa_inds) > 0:
+            new_det_low_res_masks = fill_holes_in_mask_scores(
+                new_det_low_res_masks,
+                max_area=self.fill_hole_area,
+                fill_holes=True,
+                remove_sprinkles=True,
+            )
         new_masklet_video_res_masks = F.interpolate(
             new_det_low_res_masks,
             size=(orig_vid_height, orig_vid_width),
