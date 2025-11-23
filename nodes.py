@@ -199,6 +199,13 @@ class Sam3ImageSegmentation(io.ComfyNode):
                     display_name="mask",
                     optional=True,
                 ),
+                io.Int.Input(
+                    "detection_limit",
+                    default=-1,
+                    min=-1,
+                    max=1000,
+                    tooltip="Advanced: Limit number of detections (-1 for no limit)"
+                )
             ],
             outputs=[
                 io.Mask.Output(
@@ -231,7 +238,7 @@ class Sam3ImageSegmentation(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, sam3_model, images, prompt, threshold=0.3, keep_model_loaded=False, add_background='none', enable_visualize=False,  coordinates_positive=None, coordinates_negative=None, bboxes=None, mask=None) -> io.NodeOutput:
+    def execute(cls, sam3_model, images, prompt, threshold=0.3, keep_model_loaded=False, add_background='none', detection_limit=-1, coordinates_positive=None, coordinates_negative=None, bboxes=None, mask=None) -> io.NodeOutput:
         offload_device = mm.unet_offload_device()
 
         processor = sam3_model.get("processor", None)
@@ -335,6 +342,11 @@ class Sam3ImageSegmentation(io.ComfyNode):
                         masks = masks[top_indices]
                         boxes = boxes[top_indices]
                         scores = scores[top_indices]
+
+                    if detection_limit > -1:
+                        masks = masks[:detection_limit]
+                        boxes = boxes[:detection_limit]
+                        scores = scores[:detection_limit]
 
                 output_raw_masks.append(masks)
                 # Convert masks to tensor format
