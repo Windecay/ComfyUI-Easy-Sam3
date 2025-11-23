@@ -29,62 +29,66 @@
     "display_name": "SAM3 图像分割",
     "inputs": {
       "sam3_model": {
-        "name": "SAM3 模型",
-        "tooltip": "从 LoadSam3Model 节点加载的 SAM3 模型"
+        "name": "sam3_model",
+        "tooltip": "从 LoadSam3Model 节点加载的 SAM3 模型（必须是 'image' 模式）"
       },
       "images": {
-        "name": "图像",
+        "name": "images",
         "tooltip": "输入要分割的图像"
       },
       "prompt": {
-        "name": "提示词",
-        "tooltip": "要分割的对象的文本描述（例如：'一只猫'、'人'）"
+        "name": "prompt",
+        "tooltip": "要分割的对象的文本描述（例如：'一只猫'、'人'）。支持空字符串以仅使用点/框进行分割"
       },
       "threshold": {
-        "name": "阈值",
-        "tooltip": "检测的置信度阈值"
+        "name": "threshold",
+        "tooltip": "检测的置信度阈值（0.0-1.0，默认：0.40）"
       },
       "keep_model_loaded": {
-        "name": "保持模型加载",
-        "tooltip": "推理后将模型保留在显存中"
+        "name": "keep_model_loaded",
+        "tooltip": "推理后将模型保留在显存中（默认：False）"
       },
       "add_background": {
-        "name": "添加背景",
-        "tooltip": "为分割的图像添加背景颜色"
+        "name": "add_background",
+        "tooltip": "为分割的图像添加背景颜色（none、black、white、grey）"
       },
       "coordinates_positive": {
-        "name": "正向坐标",
-        "tooltip": "用于细化的正向点击坐标"
+        "name": "coordinates_positive",
+        "tooltip": "正向点坐标，JSON 字符串格式：'[{\"x\": 50, \"y\": 120}]'"
       },
       "coordinates_negative": {
-        "name": "负向坐标",
-        "tooltip": "用于细化的负向点击坐标"
+        "name": "coordinates_negative",
+        "tooltip": "负向点坐标，JSON 字符串格式：'[{\"x\": 150, \"y\": 300}]'"
       },
       "bboxes": {
-        "name": "边界框",
-        "tooltip": "用于对象检测的边界框"
+        "name": "bboxes",
+        "tooltip": "边界框，格式为 (x_min, y_min, x_max, y_max) 或 (x, y, width, height)"
       },
       "mask": {
-        "name": "遮罩",
+        "name": "mask",
         "tooltip": "用于细化的输入遮罩"
       }
     },
     "outputs": {
       "0": {
-        "name": "遮罩",
-        "tooltip": "分割遮罩"
+        "name": "masks",
+        "tooltip": "合并的分割遮罩（每张图像一个遮罩，所有检测到的对象合并在一起）"
       },
       "1": {
-        "name": "图像",
-        "tooltip": "分割图像"
+        "name": "images",
+        "tooltip": "带 RGBA 透明通道的分割图像（可选背景）"
       },
       "2": {
-        "name": "边界框",
-        "tooltip": "检测到的边界框"
+        "name": "obj_masks",
+        "tooltip": "合并前的单个对象遮罩（用于可视化）"
       },
       "3": {
-        "name": "分数",
-        "tooltip": "检测置信度分数"
+        "name": "boxes",
+        "tooltip": "每个检测对象的边界框坐标 [N, 4] 格式"
+      },
+      "4": {
+        "name": "scores",
+        "tooltip": "每个检测对象的置信度分数"
       }
     }
   },
@@ -179,94 +183,109 @@
     "display_name": "SAM3 视频模型额外配置",
     "inputs": {
       "assoc_iou_thresh": {
-        "name": "关联 IoU 阈值",
-        "tooltip": "检测到跟踪匹配的 IoU 阈值（宽松阈值，例如 0.1-0.5）"
-      },
-      "trk_assoc_iou_thresh": {
-        "name": "跟踪关联 IoU 阈值",
-        "tooltip": "更严格的 IoU 阈值，用于确定掩码是否不匹配（例如 0.5）"
-      },
-      "hotstart_delay": {
-        "name": "热启动延迟",
-        "tooltip": "延迟 N 帧输出，以移除不匹配/重复的轨迹"
-      },
-      "hotstart_unmatch_thresh": {
-        "name": "热启动不匹配阈值",
-        "tooltip": "在热启动期间移除不匹配此数量帧的轨迹"
-      },
-      "hotstart_dup_thresh": {
-        "name": "热启动重复阈值",
-        "tooltip": "在热启动期间移除重叠的轨迹"
-      },
-      "init_trk_keep_alive": {
-        "name": "初始跟踪保活",
-        "tooltip": "创建新跟踪时的初始保活值"
-      },
-      "max_trk_keep_alive": {
-        "name": "最大跟踪保活",
-        "tooltip": "在没有检测的情况下保持跟踪活动的最大帧数"
-      },
-      "min_trk_keep_alive": {
-        "name": "最小跟踪保活",
-        "tooltip": "最小保活值（负数表示立即移除）"
-      },
-      "suppress_unmatched_within_hotstart": {
-        "name": "热启动内抑制不匹配",
-        "tooltip": "如果为真，仅在热启动期间抑制不匹配的遮罩"
+        "name": "assoc_iou_thresh",
+        "tooltip": "检测到跟踪匹配的 IoU 阈值（0.0-1.0，默认：0.1）"
       },
       "det_nms_thresh": {
-        "name": "检测 NMS 阈值",
-        "tooltip": "检测 NMS（非极大值抑制）的 IoU 阈值"
+        "name": "det_nms_thresh",
+        "tooltip": "检测 NMS（非极大值抑制）的 IoU 阈值（0.0-1.0，默认：0.1）"
       },
       "new_det_thresh": {
-        "name": "新检测阈值",
-        "tooltip": "将检测添加为新对象的阈值"
+        "name": "new_det_thresh",
+        "tooltip": "将检测添加为新对象的阈值（0.0-1.0，默认：0.7）"
+      },
+      "hotstart_delay": {
+        "name": "hotstart_delay",
+        "tooltip": "延迟 N 帧输出，以移除不匹配/重复的轨迹（0-100，默认：15）"
+      },
+      "hotstart_unmatch_thresh": {
+        "name": "hotstart_unmatch_thresh",
+        "tooltip": "在热启动期间移除不匹配此数量帧的轨迹（0-100，默认：8）"
+      },
+      "hotstart_dup_thresh": {
+        "name": "hotstart_dup_thresh",
+        "tooltip": "在热启动期间移除重叠的轨迹（0-100，默认：8）"
+      },
+      "suppress_unmatched_within_hotstart": {
+        "name": "suppress_unmatched_within_hotstart",
+        "tooltip": "如果为真，仅在热启动期间抑制不匹配的遮罩（默认：True）"
+      },
+      "min_trk_keep_alive": {
+        "name": "min_trk_keep_alive",
+        "tooltip": "最小保活值（负数表示立即移除）（-100-0，默认：-1）"
+      },
+      "max_trk_keep_alive": {
+        "name": "max_trk_keep_alive",
+        "tooltip": "在没有检测的情况下保持跟踪活动的最大帧数（0-100，默认：30）"
+      },
+      "init_trk_keep_alive": {
+        "name": "init_trk_keep_alive",
+        "tooltip": "创建新跟踪时的初始保活值（-10-100，默认：30）"
       },
       "suppress_overlap_occlusion_thresh": {
-        "name": "抑制重叠遮挡阈值",
-        "tooltip": "基于最近遮挡抑制重叠对象的阈值（0.0 禁用）"
-      },
-      "decrease_alive_for_empty_masks": {
-        "name": "空遮罩减少保活",
-        "tooltip": "为空掩码（无有效遮罩）减少保活计数器"
-      },
-      "enable_o2o_matching": {
-        "name": "启用一对一匹配",
-        "tooltip": "为现有掩码启用一对一匈牙利匹配"
+        "name": "suppress_overlap_occlusion_thresh",
+        "tooltip": "基于最近遮挡抑制重叠对象的阈值（0.0-1.0，默认：0.7，0.0 禁用）"
       },
       "suppress_det_at_boundary": {
-        "name": "边界处抑制检测",
-        "tooltip": "抑制靠近图像边界的检测"
+        "name": "suppress_det_at_boundary",
+        "tooltip": "抑制靠近图像边界的检测（默认：False）"
       },
       "fill_hole_area": {
-        "name": "填充孔洞面积",
-        "tooltip": "填充遮罩中小于此面积的孔洞（以像素为单位）"
-      },
-      "max_num_objects": {
-        "name": "最大对象数量",
-        "tooltip": "要跟踪的最大对象数（-1 表示无限制）"
+        "name": "fill_hole_area",
+        "tooltip": "填充遮罩中小于此面积的孔洞（像素）（0-1000，默认：16）"
       },
       "recondition_every_nth_frame": {
-        "name": "每 N 帧重新调整",
-        "tooltip": "每 N 帧重新调整跟踪（-1 禁用）"
+        "name": "recondition_every_nth_frame",
+        "tooltip": "每 N 帧重新调整跟踪（-1-1000，默认：16，-1 禁用）"
       },
       "enable_masklet_confirmation": {
-        "name": "启用掩码确认",
-        "tooltip": "启用掩码确认以抑制未确认的轨迹"
+        "name": "enable_masklet_confirmation",
+        "tooltip": "启用掩码确认以抑制未确认的轨迹（默认：False）"
       },
-      "masklet_confirm_frames": {
-        "name": "掩码确认帧数",
-        "tooltip": "掩码确认所需的帧数"
+      "decrease_alive_for_empty_masks": {
+        "name": "decrease_alive_for_empty_masks",
+        "tooltip": "为空掩码（无有效遮罩）减少保活计数器（默认：False）"
       },
       "image_size": {
-        "name": "图像尺寸",
-        "tooltip": "模型的输入图像尺寸"
+        "name": "image_size",
+        "tooltip": "模型的输入图像尺寸（256-2048，步长：8，默认：1008）"
       }
     },
     "outputs": {
       "0": {
-        "name": "额外配置",
+        "name": "extra_config",
         "tooltip": "SAM3 模型配置字典"
+      }
+    }
+  },
+  "easy sam3Visualization": {
+    "display_name": "Sam3 可视化",
+    "inputs": {
+      "image": {
+        "name": "image",
+        "tooltip": "用于显示遮罩的输入图像"
+      },
+      "obj_masks": {
+        "name": "obj_masks",
+        "tooltip": "来自 Sam3 图像分割节点的单个对象遮罩 [B, N, H, W] 格式"
+      },
+      "scores": {
+        "name": "scores",
+        "tooltip": "来自 Sam3 图像分割节点的置信度分数（0.0-1.0）"
+      },
+      "alpha": {
+        "name": "alpha",
+        "tooltip": "遮罩叠加的透明度（0.0-1.0，默认：0.5）。0=完全透明，1=完全不透明"
+      },
+      "stroke_width": {
+        "name": "stroke_width",
+        "tooltip": "遮罩边框的宽度（像素）（1-100，默认：5）"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "visualization",
+        "tooltip": "叠加了彩色遮罩、边框和置信度分数的可视化图像"
       }
     }
   }

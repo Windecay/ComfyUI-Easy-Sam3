@@ -30,7 +30,7 @@
     "inputs": {
       "sam3_model": {
         "name": "sam3_model",
-        "tooltip": "SAM3 model loaded from LoadSam3Model node"
+        "tooltip": "SAM3 model loaded from LoadSam3Model node (must be in 'image' mode)"
       },
       "images": {
         "name": "images",
@@ -38,31 +38,31 @@
       },
       "prompt": {
         "name": "prompt",
-        "tooltip": "Text description of objects to segment (e.g., 'a cat', 'person')"
+        "tooltip": "Text description of objects to segment (e.g., 'a cat', 'person'). Supports empty string for point/box only segmentation"
       },
       "threshold": {
         "name": "threshold",
-        "tooltip": "Confidence threshold for detections"
+        "tooltip": "Confidence threshold for detections (0.0-1.0, default: 0.40)"
       },
       "keep_model_loaded": {
         "name": "keep_model_loaded",
-        "tooltip": "Keep model in VRAM after inference"
+        "tooltip": "Keep model in VRAM after inference (default: False)"
       },
       "add_background": {
         "name": "add_background",
-        "tooltip": "Add background color to segmented images"
+        "tooltip": "Add background color to segmented images (none, black, white, grey)"
       },
       "coordinates_positive": {
         "name": "coordinates_positive",
-        "tooltip": "Positive click coordinates for refinement"
+        "tooltip": "Positive point coordinates as JSON string: '[{\"x\": 50, \"y\": 120}]'"
       },
       "coordinates_negative": {
         "name": "coordinates_negative",
-        "tooltip": "Negative click coordinates for refinement"
+        "tooltip": "Negative point coordinates as JSON string: '[{\"x\": 150, \"y\": 300}]'"
       },
       "bboxes": {
         "name": "bboxes",
-        "tooltip": "Bounding boxes for object detection"
+        "tooltip": "Bounding boxes as (x_min, y_min, x_max, y_max) or (x, y, width, height)"
       },
       "mask": {
         "name": "mask",
@@ -72,19 +72,23 @@
     "outputs": {
       "0": {
         "name": "masks",
-        "tooltip": "Segmentation masks"
+        "tooltip": "Combined segmentation masks (one mask per image with all detected objects merged)"
       },
       "1": {
         "name": "images",
-        "tooltip": "Segmentation images"
+        "tooltip": "Segmented images with RGBA alpha channel (with optional background)"
       },
       "2": {
-        "name": "boxes",
-        "tooltip": "Detected bounding boxes"
+        "name": "obj_masks",
+        "tooltip": "Individual object masks before combining (for visualization)"
       },
       "3": {
+        "name": "boxes",
+        "tooltip": "Bounding boxes for each detected object [N, 4] format"
+      },
+      "4": {
         "name": "scores",
-        "tooltip": "Detection confidence scores"
+        "tooltip": "Confidence scores for each detected object"
       }
     }
   },
@@ -180,93 +184,108 @@
     "inputs": {
       "assoc_iou_thresh": {
         "name": "assoc_iou_thresh",
-        "tooltip": "IoU threshold for detection-to-track matching (loose threshold, e.g., 0.1-0.5)"
-      },
-      "trk_assoc_iou_thresh": {
-        "name": "trk_assoc_iou_thresh",
-        "tooltip": "Stricter IoU threshold to determine if a masklet is unmatched (e.g., 0.5)"
-      },
-      "hotstart_delay": {
-        "name": "hotstart_delay",
-        "tooltip": "Hold off outputs for N frames to remove unmatched/duplicate tracklets"
-      },
-      "hotstart_unmatch_thresh": {
-        "name": "hotstart_unmatch_thresh",
-        "tooltip": "Remove tracklets unmatched for this many frames during hotstart"
-      },
-      "hotstart_dup_thresh": {
-        "name": "hotstart_dup_thresh",
-        "tooltip": "Remove overlapping tracklets during hotstart"
-      },
-      "init_trk_keep_alive": {
-        "name": "init_trk_keep_alive",
-        "tooltip": "Initial keep-alive value when a new track is created"
-      },
-      "max_trk_keep_alive": {
-        "name": "max_trk_keep_alive",
-        "tooltip": "Maximum frames to keep a track alive without detections"
-      },
-      "min_trk_keep_alive": {
-        "name": "min_trk_keep_alive",
-        "tooltip": "Minimum keep-alive value (negative means immediate removal)"
-      },
-      "suppress_unmatched_within_hotstart": {
-        "name": "suppress_unmatched_within_hotstart",
-        "tooltip": "If True, only suppress unmatched masks within hotstart period"
+        "tooltip": "IoU threshold for detection-to-track matching (0.0-1.0, default: 0.1)"
       },
       "det_nms_thresh": {
         "name": "det_nms_thresh",
-        "tooltip": "IoU threshold for detection NMS (Non-Maximum Suppression)"
+        "tooltip": "IoU threshold for detection NMS (Non-Maximum Suppression) (0.0-1.0, default: 0.1)"
       },
       "new_det_thresh": {
         "name": "new_det_thresh",
-        "tooltip": "Threshold for a detection to be added as a new object"
+        "tooltip": "Threshold for a detection to be added as a new object (0.0-1.0, default: 0.7)"
+      },
+      "hotstart_delay": {
+        "name": "hotstart_delay",
+        "tooltip": "Hold off outputs for N frames to remove unmatched/duplicate tracklets (0-100, default: 15)"
+      },
+      "hotstart_unmatch_thresh": {
+        "name": "hotstart_unmatch_thresh",
+        "tooltip": "Remove tracklets unmatched for this many frames during hotstart (0-100, default: 8)"
+      },
+      "hotstart_dup_thresh": {
+        "name": "hotstart_dup_thresh",
+        "tooltip": "Remove overlapping tracklets during hotstart (0-100, default: 8)"
+      },
+      "suppress_unmatched_within_hotstart": {
+        "name": "suppress_unmatched_within_hotstart",
+        "tooltip": "If True, only suppress unmatched masks within hotstart period (default: True)"
+      },
+      "min_trk_keep_alive": {
+        "name": "min_trk_keep_alive",
+        "tooltip": "Minimum keep-alive value (negative means immediate removal) (-100-0, default: -1)"
+      },
+      "max_trk_keep_alive": {
+        "name": "max_trk_keep_alive",
+        "tooltip": "Maximum frames to keep a track alive without detections (0-100, default: 30)"
+      },
+      "init_trk_keep_alive": {
+        "name": "init_trk_keep_alive",
+        "tooltip": "Initial keep-alive value when a new track is created (-10-100, default: 30)"
       },
       "suppress_overlap_occlusion_thresh": {
         "name": "suppress_overlap_occlusion_thresh",
-        "tooltip": "Threshold for suppressing overlapping objects based on recent occlusion (0.0 to disable)"
-      },
-      "decrease_alive_for_empty_masks": {
-        "name": "decrease_alive_for_empty_masks",
-        "tooltip": "Decrease keep-alive counter for empty masklets (no valid masks)"
-      },
-      "enable_o2o_matching": {
-        "name": "enable_o2o_matching",
-        "tooltip": "Enable one-to-one Hungarian matching for existing masklets"
+        "tooltip": "Threshold for suppressing overlapping objects based on recent occlusion (0.0-1.0, default: 0.7, 0.0 to disable)"
       },
       "suppress_det_at_boundary": {
         "name": "suppress_det_at_boundary",
-        "tooltip": "Suppress detections close to image boundaries"
+        "tooltip": "Suppress detections close to image boundaries (default: False)"
       },
       "fill_hole_area": {
         "name": "fill_hole_area",
-        "tooltip": "Fill holes in masks smaller than this area (in pixels)"
-      },
-      "max_num_objects": {
-        "name": "max_num_objects",
-        "tooltip": "Maximum number of objects to track (-1 for unlimited)"
+        "tooltip": "Fill holes in masks smaller than this area in pixels (0-1000, default: 16)"
       },
       "recondition_every_nth_frame": {
         "name": "recondition_every_nth_frame",
-        "tooltip": "Recondition tracking every N frames (-1 to disable)"
+        "tooltip": "Recondition tracking every N frames (-1-1000, default: 16, -1 to disable)"
       },
       "enable_masklet_confirmation": {
         "name": "enable_masklet_confirmation",
-        "tooltip": "Enable masklet confirmation to suppress unconfirmed tracklets"
+        "tooltip": "Enable masklet confirmation to suppress unconfirmed tracklets (default: False)"
       },
-      "masklet_confirm_frames": {
-        "name": "masklet_confirm_frames",
-        "tooltip": "Frames needed for masklet confirmation"
+      "decrease_alive_for_empty_masks": {
+        "name": "decrease_alive_for_empty_masks",
+        "tooltip": "Decrease keep-alive counter for empty masklets (no valid masks) (default: False)"
       },
       "image_size": {
         "name": "image_size",
-        "tooltip": "Input image size for the model"
+        "tooltip": "Input image size for the model (256-2048, step: 8, default: 1008)"
       }
     },
     "outputs": {
       "0": {
         "name": "extra_config",
         "tooltip": "SAM3 model configuration dictionary"
+      }
+    }
+  },
+  "easy sam3Visualization": {
+    "display_name": "Sam3 Visualization",
+    "inputs": {
+      "image": {
+        "name": "image",
+        "tooltip": "Input image to visualize masks on"
+      },
+      "obj_masks": {
+        "name": "obj_masks",
+        "tooltip": "Individual object masks from Sam3 Image Segmentation node [B, N, H, W] format"
+      },
+      "scores": {
+        "name": "scores",
+        "tooltip": "Confidence scores from Sam3 Image Segmentation node (0.0-1.0)"
+      },
+      "alpha": {
+        "name": "alpha",
+        "tooltip": "Transparency of mask overlay (0.0-1.0, default: 0.5). 0=fully transparent, 1=fully opaque"
+      },
+      "stroke_width": {
+        "name": "stroke_width",
+        "tooltip": "Width of the mask border stroke in pixels (1-100, default: 5)"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "visualization",
+        "tooltip": "Visualized images with colored masks, borders, and confidence scores overlaid"
       }
     }
   }

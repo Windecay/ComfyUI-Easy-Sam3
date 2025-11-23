@@ -11,9 +11,9 @@ from contextlib import nullcontext
 
 from PIL import Image
 from typing import Tuple, Any
-from comfy_api.latest import ComfyExtension, io
+from comfy_api.latest import ComfyExtension, io, ui
 from .sam3.logger import get_logger
-from .utils import tensor_to_pil, pil_to_tensor, masks_to_tensor, join_image_with_alpha, parse_points, parse_bbox
+from .utils import tensor_to_pil, pil_to_tensor, masks_to_tensor, join_image_with_alpha, parse_points, parse_bbox, visualize_masks_on_image
 
 logger = get_logger(__name__)
 
@@ -204,24 +204,28 @@ class Sam3ImageSegmentation(io.ComfyNode):
                 io.Mask.Output(
                     "output_masks",
                     display_name="masks",
-                    is_output_list=True,
-                    tooltip="Segmentation masks"
+                    # is_output_list=True,
+                    tooltip="Segmentation masks (combined per image)"
                 ),
                 io.Image.Output(
                     "output_images",
                     display_name="images",
-                    is_output_list=True,
                     tooltip="Segmentation images",
                 ),
-                io.String.Output(
+                io.Mask.Output(
+                    "obj_masks",
+                    display_name="obj_masks",
+                    tooltip="Individual object masks before combining (for visualization)"
+                ),
+                io.BBOX.Output(
                     "boxes",
                     display_name="boxes",
-                    is_output_list=True,
+                    tooltip="Bounding boxes for each detected object"
                 ),
-                io.String.Output(
+                io.Float.Output(
                     "scores",
                     display_name="scores",
-                    is_output_list=True,
+                    tooltip="Confidence scores for each detected object"
                 ),
             ]
         )
@@ -267,8 +271,7 @@ class Sam3ImageSegmentation(io.ComfyNode):
             bbox_coords, bbox_count = parse_bbox(bboxes, images.shape)
             if bbox_coords is not None:
                 bounding_boxes = bbox_coords
-                bounding_box_labels = [1] * bbox_count
-
+                bounding_box_labels = [True] * bbox_count
 
         # Switch model to main device
         model.to(device)
@@ -287,6 +290,7 @@ class Sam3ImageSegmentation(io.ComfyNode):
             output_images = []
             output_boxes = []
             output_scores = []
+            output_raw_masks = []
 
             # Initialize progress bar
 
@@ -297,17 +301,19 @@ class Sam3ImageSegmentation(io.ComfyNode):
                 # Set single image in processor
                 state = processor.set_image(pil_img)
 
-                # Prompt the model with text
+                # text prompt
                 prompt_text = prompt.strip()
                 if prompt_text:
                     state = processor.set_text_prompt(prompt_text, state)
 
                 # points
                 if points is not None and len(points) > 0:
+                    logging.info(f"Processing {len(points)} points")
                     state = processor.add_point_prompt(points, point_labels, state)
                 # bbox
                 if bounding_boxes is not None and len(bounding_boxes) > 0:
-                    state = processor.add_multiple_box_prompts(bounding_boxes, bounding_box_labels, state)
+                    logger.info("Adding %d bounding box(es) as prompt", len(bounding_boxes))
+                    state = processor.add_boxes_prompts(bounding_boxes, bounding_box_labels, state)
                 # mask
                 if mask is not None:
                     state = processor.add_mask_prompt(mask, state)
@@ -320,26 +326,28 @@ class Sam3ImageSegmentation(io.ComfyNode):
                 # Handle empty results for this image
                 if masks is None or len(masks) == 0:
                     logger.warning(f"No masks detected for image {idx}, using empty mask")
-                    combined_mask = torch.zeros(H, W)
+                    masks = torch.zeros(H, W)
                 else:
                     # Sort by scores (highest confidence first)
                     if scores is not None and len(scores) > 0:
                         logger.info(f"Image {idx}: detected {len(masks)} mask(s) with top score: {scores.max().item():.3f}")
                         top_indices = torch.argsort(scores, descending=True)
                         masks = masks[top_indices]
+                        boxes = boxes[top_indices]
                         scores = scores[top_indices]
 
-                    # Convert masks to tensor format
-                    masks_tensor = masks_to_tensor(masks)
+                output_raw_masks.append(masks)
+                # Convert masks to tensor format
+                masks_tensor = masks_to_tensor(masks)
 
-                    if masks_tensor is None or len(masks_tensor) == 0:
-                        logger.warning(f"Failed to convert masks for image {idx}, using empty mask")
-                        combined_mask = torch.zeros(H, W)
-                    else:
-                        # Combine all masks for this image using logical OR (union of all detected objects)
-                        # This creates a single mask that includes all detected objects
-                        combined_mask = (masks_tensor.sum(dim=0) > 0).float()
-                        logger.info(f"Image {idx}: combined {len(masks_tensor)} mask(s) into one")
+                if masks_tensor is None or len(masks_tensor) == 0:
+                    logger.warning(f"Failed to convert masks for image {idx}, using empty mask")
+                    combined_mask = torch.zeros(H, W)
+                else:
+                    # Combine all masks for this image using logical OR (union of all detected objects)
+                    # This creates a single mask that includes all detected objects
+                    combined_mask = (masks_tensor.sum(dim=0) > 0).float()
+                    logger.info(f"Image {idx}: combined {len(masks_tensor)} mask(s) into one")
 
 
                 output_masks.append(combined_mask)
@@ -360,9 +368,9 @@ class Sam3ImageSegmentation(io.ComfyNode):
                     alpha = rgba_image[:, :, :, 3:4]
 
                     composited = rgb * alpha + bg_color * (1 - alpha)
-                    output_images.append([composited.squeeze(0)])
+                    output_images.append(composited.squeeze(0))
                 else:
-                    output_images.append([rgba_image.squeeze(0)])
+                    output_images.append(rgba_image.squeeze(0))
 
                 output_boxes.append(boxes)
                 output_scores.append(scores)
@@ -372,6 +380,9 @@ class Sam3ImageSegmentation(io.ComfyNode):
                 pbar.update_absolute(processed_frames, num_frames)
 
             output_masks = torch.stack(output_masks, dim=0)
+            output_boxes = torch.stack(output_boxes, dim=0)
+            output_scores = torch.stack(output_scores, dim=0)
+            output_raw_masks = torch.stack(output_raw_masks, dim=0)
             logger.debug(f"Output masks shape: {output_masks.shape} (matches input images: {B})")
 
             # Clean up if not keeping model loaded
@@ -379,7 +390,7 @@ class Sam3ImageSegmentation(io.ComfyNode):
                 model.to(offload_device)
                 mm.soft_empty_cache()
 
-        return io.NodeOutput(output_masks, output_images, output_boxes, output_scores)
+        return io.NodeOutput(output_masks, output_images,output_raw_masks, output_boxes, output_scores,)
 
 
 class Sam3VideoSegmentation(io.ComfyNode):
@@ -611,7 +622,6 @@ class Sam3VideoSegmentation(io.ComfyNode):
                     bounding_boxes = bbox_coords
                     bounding_box_labels = [1] * bbox_count
 
-            # print('bbox_coords:', bbox_coords)
             # Add Prompt
             response = video_predictor.handle_request(
                 request=dict(
@@ -658,7 +668,6 @@ class Sam3VideoSegmentation(io.ComfyNode):
                         mask = outputs["out_binary_masks"]
                         object_outputs["obj_masks"] = mask
                         if mask.shape[0] > 0:
-                            # 合并的
                             merged_mask = np.any(mask, axis=0).astype(np.float32)
                             frame_masks = torch.from_numpy(merged_mask)
                             output_masks[frame_idx] = frame_masks
@@ -866,5 +875,109 @@ class Sam3VideoModelExtraConfig(io.ComfyNode):
         logger.info(f"Created SAM3 model config with {len(config)} parameters")
         
         return io.NodeOutput(config)
+
+
+class Sam3Visualization(io.ComfyNode):
+    """Visualize segmentation masks with bounding boxes and scores on images."""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy sam3Visualization",
+            display_name="Sam3 Visualization",
+            category="EasyUse/Sam3",
+            description="Display mask visualization with objects, bounding boxes and confidence scores",
+            inputs=[
+                io.Image.Input(
+                    "image",
+                    tooltip="Input image to visualize masks on"
+                ),
+                io.Mask.Input(
+                    "obj_masks",
+                    display_name="obj_masks",
+                    tooltip="Individual object masks from Sam3 Image Segmentation node",
+                ),
+                io.Float.Input(
+                    "scores",
+                    display_name="scores",
+                    min=0,
+                    max=1,
+                    step=0.0001,
+                    tooltip="Confidence scores from Sam3 Image Segmentation node",
+                    force_input=True,
+                    optional=True,
+                ),
+                io.Float.Input(
+                    "alpha",
+                    default=0.5,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    tooltip="Transparency of mask overlay (0=transparent, 1=opaque)"
+                ),
+                io.Int.Input(
+                    "stroke_width",
+                    default=5,
+                    min=1,
+                    max=100,
+                    step=1,
+                    tooltip="Width of the mask border stroke"
+                ),
+            ],
+            outputs=[
+                io.Image.Output(
+                    "visualization",
+                    display_name="visualization",
+                )
+            ],
+        )
+
+    @classmethod
+    def execute(cls, image, obj_masks, alpha=0.5, stroke_width=5, scores=None) -> io.NodeOutput:
+        """
+        Execute visualization of masks on images.
+        
+        Args:
+            image: Input images tensor [B, H, W, C]
+            boxes: List of bounding box tensors, one per image [N, 4] in [x0, y0, x1, y1] format
+            scores: List of score tensors, one per image [N]
+            masks: Optional list of mask tensors, one per image [N, H, W]
+            alpha: Transparency for mask overlay
+            
+        Returns:
+            Visualized images with masks, boxes and scores overlaid
+        """
+        B = image.shape[0]
+
+        # Convert images to PIL format
+        pil_images = tensor_to_pil(image)
+
+        # Process each image
+        visualized_images = []
+        
+        for idx in range(B):
+            pil_image = pil_images[idx]
+            raw_masks = obj_masks[idx] if obj_masks is not None else None
+            # Create visualization
+            # Note: If masks are None, visualize_masks_on_image will still draw boxes and scores
+            vis_image = visualize_masks_on_image(
+                pil_image,
+                raw_masks,
+                scores,
+                alpha=alpha,
+                stroke_width=stroke_width
+            )
+
+            # Convert back to tensor
+            vis_tensor = pil_to_tensor(vis_image)
+            visualized_images.append(vis_tensor)
+
+        # Stack all visualized images
+        output_images = torch.cat(visualized_images, dim=0)
+        
+        logger.info(f"Visualized {B} image(s) with masks, boxes and scores")
+        
+        # Return with preview UI
+        return io.NodeOutput(output_images,)
 
 

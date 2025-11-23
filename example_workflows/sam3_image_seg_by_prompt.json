@@ -188,7 +188,6 @@
       "outputs": [
         {
           "name": "masks",
-          "shape": 6,
           "type": "MASK",
           "links": [
             298
@@ -196,22 +195,24 @@
         },
         {
           "name": "images",
-          "shape": 6,
           "type": "IMAGE",
           "links": [
             303
           ]
         },
         {
+          "name": "obj_masks",
+          "type": "MASK",
+          "links": null
+        },
+        {
           "name": "boxes",
-          "shape": 6,
-          "type": "STRING",
+          "type": "BBOX",
           "links": null
         },
         {
           "name": "scores",
-          "shape": 6,
-          "type": "STRING",
+          "type": "FLOAT",
           "links": null
         }
       ],
@@ -270,8 +271,8 @@
         -79.3314399803767
       ]
     },
-    "workflowRendererVersion": "LG",
     "frontendVersion": "1.33.5",
+    "workflowRendererVersion": "LG",
     "VHS_latentpreview": false,
     "VHS_latentpreviewrate": 0,
     "VHS_MetadataImage": true,

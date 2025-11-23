@@ -8,7 +8,8 @@ class Sam3Extension(ComfyExtension):
             LoadSam3Model,
             Sam3ImageSegmentation,
             Sam3VideoSegmentation,
-            Sam3VideoModelExtraConfig
+            Sam3VideoModelExtraConfig,
+            Sam3Visualization
         ]
 
 async def comfy_entrypoint() -> Sam3Extension:

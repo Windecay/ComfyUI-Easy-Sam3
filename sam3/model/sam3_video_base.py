@@ -19,8 +19,7 @@ from ..logger import get_logger
 from .box_ops import fast_diag_box_iou
 from .data_misc import BatchedDatapoint
 from .sam3_tracker_utils import fill_holes_in_mask_scores, mask_to_box
-from ..perflib.masks_ops import mask_iou
-from ..train_masks_ops import rle_encode
+from ..perflib.masks_ops import mask_iou, rle_encode
 from torch import nn, Tensor
 
 logger = get_logger(__name__)

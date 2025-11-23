@@ -46,49 +46,50 @@ Load a SAM3 model for image or video segmentation.
 Segment objects in images using text prompts and optional geometric prompts.
 
 **Inputs:**
-- `sam3_model`: SAM3 model from Load SAM3 Model node
+- `sam3_model`: SAM3 model from Load SAM3 Model node (must be in 'image' mode)
 - `images`: Input images to segment
-- `prompt`: Text description of objects to segment (e.g., "a cat", "person")
-- `threshold`: Confidence threshold for detections (0.0-1.0, default: 0.60)
-- `keep_model_loaded`: Keep model in VRAM after inference
-- `add_background`: Add background color (none, black, white, grey)
-- `coordinates_positive` (optional): Positive click coordinates to refine segmentation
-- `coordinates_negative` (optional): Negative click coordinates to exclude areas
-- `bboxes` (optional): Bounding boxes to guide segmentation
+- `prompt`: Text description of objects to segment (e.g., "a cat", "person"). Supports empty string for point/box only segmentation
+- `threshold`: Confidence threshold for detections (0.0-1.0, step: 0.05, default: 0.40)
+- `keep_model_loaded`: Keep model in VRAM after inference (default: False)
+- `add_background`: Add background color to segmented images (options: none, black, white, grey, default: none)
+- `coordinates_positive` (optional): Positive point coordinates to refine segmentation. Format: JSON string like `"[{\"x\": 50, \"y\": 120}]"`
+- `coordinates_negative` (optional): Negative point coordinates to exclude areas. Format: JSON string like `"[{\"x\": 150, \"y\": 300}]"`
+- `bboxes` (optional): Bounding boxes to guide segmentation. Format: (x_min, y_min, x_max, y_max) or (x, y, width, height)
 - `mask` (optional): Input mask for refinement
 
 **Outputs:**
-- `masks`: Segmentation masks
-- `images`: Segmented images (with optional background)
-- `boxes`: Bounding box coordinates for detected objects
-- `scores`: Confidence scores for each detection
+- `masks`: Combined segmentation masks (one mask per image with all detected objects merged)
+- `images`: Segmented images with RGBA alpha channel (with optional background)
+- `obj_masks`: Individual object masks before combining (for visualization, preserves all detected objects separately)
+- `boxes`: Bounding box coordinates for each detected object [N, 4] format
+- `scores`: Confidence scores for each detected object
 
 ### 3. SAM3 Video Segmentation
 Track and segment objects across video frames with advanced prompting options.
 
 **Inputs:**
-- `sam3_model`: SAM3 model in video mode
-- `session_id` (optional): Session ID to resume tracking from a previous session
-- `video_frames`: Video frames as image sequence
-- `prompt`: Text description of objects to track (e.g., "person", "car")
-- `frame_index`: Frame where initial prompt is applied (0 to max frames)
-- `object_id`: Unique ID for multi-object tracking (1-1000, default: 1)
-- `score_threshold_detection`: Detection confidence threshold (0.0-1.0, default: 0.5)
-- `new_det_thresh`: Threshold for adding new objects (0.0-1.0, default: 0.7)
-- `propagation_direction`: Propagation direction (both, forward, backward)
-- `start_frame_index`: Frame index to start propagation (default: 0)
-- `max_frames_to_track`: Maximum frames to process (-1 for all frames)
-- `close_after_propagation`: Close session after completion (default: True)
-- `keep_model_loaded`: Keep model in VRAM after inference
-- `extra_config` (optional): Additional configuration from Extra Config node
-- `positive_coords` (optional): Positive click coordinates as JSON array
-- `negative_coords` (optional): Negative click coordinates as JSON array
-- `bbox` (optional): Bounding box to initialize tracking
+- `sam3_model`: SAM3 model from Load SAM3 Model node (must be in 'video' mode)
+- `session_id` (optional): Session ID to resume tracking from a previous session. If not provided, a new session will be created
+- `video_frames`: Video frames as image sequence (tensor format)
+- `prompt`: Text description of objects to track (e.g., "person", "car"). Supports empty string for point/box only tracking
+- `frame_index`: Frame index where initial prompt is applied (min: 0, max: 100000, step: 1). Will be clamped to valid frame range
+- `object_id`: Unique ID for multi-object tracking (min: 1, max: 1000, step: 1, default: 1)
+- `score_threshold_detection`: Detection confidence threshold (0.0-1.0, step: 0.05, default: 0.5)
+- `new_det_thresh`: Threshold for a detection to be added as a new object (0.0-1.0, step: 0.05, default: 0.7)
+- `propagation_direction`: Direction to propagate masks (options: both, forward, backward, default: both)
+- `start_frame_index`: Frame index to start propagation from (min: 0, max: 100000, step: 1, default: 0)
+- `max_frames_to_track`: Maximum number of frames to process (min: -1, default: -1 for all frames)
+- `close_after_propagation`: Close the session after propagation completes (default: True)
+- `keep_model_loaded`: Keep model in VRAM after inference (default: False)
+- `extra_config` (optional): Additional configuration from SAM3 Video Model Extra Config node
+- `positive_coords` (optional): Positive click coordinates as JSON string. Format: `"[{\"x\": 50, \"y\": 120}]"`
+- `negative_coords` (optional): Negative click coordinates as JSON string. Format: `"[{\"x\": 150, \"y\": 300}]"`
+- `bbox` (optional): Bounding box to initialize tracking. Format: (x_min, y_min, x_max, y_max) or (x, y, width, height). Compatible with KJNodes Points Editor bbox output
 
 **Outputs:**
-- `masks`: Tracked segmentation masks for all frames
-- `session_id`: Session ID for resuming tracking
-- `objects`: Object tracking information and metadata
+- `masks`: Tracked segmentation masks for all frames [B, H, W] format with merged object masks per frame
+- `session_id`: Session ID string for resuming tracking in subsequent calls
+- `objects`: Object tracking information dictionary containing `obj_ids` and `obj_masks` arrays
 
 ### 4. SAM3 Video Model Extra Config
 Configure advanced parameters for video segmentation to fine-tune tracking behavior.
@@ -114,6 +115,19 @@ Configure advanced parameters for video segmentation to fine-tune tracking behav
 
 **Output:**
 - `extra_config`: Configuration dictionary for Video Segmentation node
+
+### 5. Sam3 Visualization
+Visualize segmentation masks with bounding boxes and confidence scores overlaid on images.
+
+**Inputs:**
+- `image`: Input image to visualize masks on (tensor format)
+- `obj_masks`: Individual object masks from Sam3 Image Segmentation node. Format: [B, N, H, W] where N is number of objects
+- `scores` (optional): Confidence scores from Sam3 Image Segmentation node (min: 0, max: 1, step: 0.0001)
+- `alpha`: Transparency of mask overlay (0.0-1.0, step: 0.05, default: 0.5). 0=fully transparent, 1=fully opaque
+- `stroke_width`: Width of the mask border stroke in pixels (min: 1, max: 100, step: 1, default: 5)
+
+**Outputs:**
+- `visualization`: Visualized images with colored masks, borders, and confidence scores overlaid
 
 ## Usage Examples
 

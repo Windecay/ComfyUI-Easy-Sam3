@@ -104,10 +104,20 @@ def pil_to_tensor(pil_images: Union[List[Image.Image], Image.Image]) -> torch.Te
 
 
 def masks_to_tensor(masks: Union[torch.Tensor, Image.Image, List, np.ndarray]) -> Optional[torch.Tensor]:
+    """
+    Convert various mask formats to tensor format.
+    
+    Args:
+        masks: Masks in various formats (torch.Tensor, Image.Image, List, np.ndarray)
+    
+    Returns:
+        torch.Tensor [N, H, W] with values in [0, 1], or None if conversion fails
+    """
     if isinstance(masks, torch.Tensor):
         # Ensure float type and range [0, 1]
         masks = masks.float()
-        if masks.max() > 1.0:
+        # Check if tensor is not empty before calling max()
+        if masks.numel() > 0 and masks.max() > 1.0:
             masks = masks / 255.0
 
         # Squeeze extra channel dimension if present (N, 1, H, W) -> (N, H, W)
@@ -117,7 +127,8 @@ def masks_to_tensor(masks: Union[torch.Tensor, Image.Image, List, np.ndarray]) -
         return masks.cpu()
     elif isinstance(masks, np.ndarray):
         masks = torch.from_numpy(masks).float()
-        if masks.max() > 1.0:
+        # Check if tensor is not empty before calling max()
+        if masks.numel() > 0 and masks.max() > 1.0:
             masks = masks / 255.0
 
         # Squeeze extra channel dimension if present
@@ -129,22 +140,23 @@ def masks_to_tensor(masks: Union[torch.Tensor, Image.Image, List, np.ndarray]) -
     return masks
 
 # code based on  https://github.com/PozzettiAndrea/ComfyUI-SAM3/blob/main/nodes/utils.py
-def visualize_masks_on_image(image, masks, boxes=None, scores=None, alpha=0.5):
+def visualize_masks_on_image(image, masks, scores=None, alpha=0.5, stroke_width=5):
     """
     Create visualization of masks overlaid on image
 
     Args:
-        image: PIL Image or numpy array
+        image: PIL Image or numpy array or torch.Tensor
         masks: torch.Tensor [N, H, W] binary masks
-        boxes: Optional torch.Tensor [N, 4] bounding boxes in [x0, y0, x1, y1]
         scores: Optional torch.Tensor [N] confidence scores
         alpha: Transparency of mask overlay
+        stroke_width: Width of the stroke border around masks (default: 5)
 
     Returns:
         PIL Image with visualization
     """
     if isinstance(image, torch.Tensor):
-        image = pil_to_tensor(image)
+        # tensor_to_pil returns a list, get the first image
+        image = tensor_to_pil(image)[0]
     elif isinstance(image, np.ndarray):
         image = Image.fromarray((image * 255).astype(np.uint8) if image.max() <= 1.0 else image.astype(np.uint8))
 
@@ -161,6 +173,9 @@ def visualize_masks_on_image(image, masks, boxes=None, scores=None, alpha=0.5):
     np.random.seed(42)  # Consistent colors
     overlay = img_np.copy()
 
+    from PIL import ImageDraw, ImageFont
+    from scipy import ndimage
+
     for i, mask in enumerate(masks_np):
         # Squeeze extra dimensions (masks may be [1, H, W] or [H, W])
         while mask.ndim > 2:
@@ -175,8 +190,26 @@ def visualize_masks_on_image(image, masks, boxes=None, scores=None, alpha=0.5):
 
         # Random color for this mask
         color = np.random.rand(3)
+        
+        # Create darker stroke color (0.4x of original color for darker effect)
+        stroke_color = color * 0.4
 
-        # Apply colored mask
+        # Create thick stroke using morphological operations
+        binary_mask = (mask > 0.5).astype(np.uint8)
+        # Dilate to get outer boundary (thick stroke with configurable width)
+        dilated = ndimage.binary_dilation(binary_mask, iterations=stroke_width).astype(np.float32)
+        # Stroke is the difference between dilated and original
+        stroke_mask = dilated - binary_mask
+
+        # Apply stroke (darker color with full opacity, no alpha blending)
+        for c in range(3):
+            overlay[:, :, c] = np.where(
+                stroke_mask > 0.5,
+                stroke_color[c],
+                overlay[:, :, c]
+            )
+
+        # Apply colored mask (lighter fill)
         for c in range(3):
             overlay[:, :, c] = np.where(
                 mask > 0.5,
@@ -184,34 +217,63 @@ def visualize_masks_on_image(image, masks, boxes=None, scores=None, alpha=0.5):
                 overlay[:, :, c]
             )
 
-    # Convert back to PIL
+    # Convert overlay to PIL image once after all masks are applied
     result = Image.fromarray((overlay * 255).astype(np.uint8))
+    draw = ImageDraw.Draw(result)
 
-    # Draw boxes if provided
-    if boxes is not None:
-        from PIL import ImageDraw, ImageFont
-        draw = ImageDraw.Draw(result)
+    # Reset random seed for consistent colors
+    np.random.seed(42)
 
-        if isinstance(boxes, torch.Tensor):
-            boxes_np = boxes.cpu().numpy()
-        else:
-            boxes_np = boxes
+    # Draw text labels for each mask
+    for i, mask in enumerate(masks_np):
+        # Squeeze extra dimensions
+        while mask.ndim > 2:
+            mask = mask.squeeze(0)
 
-        for i, box in enumerate(boxes_np):
-            x0, y0, x1, y1 = box
+        # Resize mask if needed (same as above)
+        if mask.shape != img_np.shape[:2]:
+            from PIL import Image as PILImage
+            mask_pil = PILImage.fromarray((mask * 255).astype(np.uint8))
+            mask_pil = mask_pil.resize((img_np.shape[1], img_np.shape[0]), PILImage.NEAREST)
+            mask = np.array(mask_pil).astype(np.float32) / 255.0
 
-            # Random color for this box (same seed for consistency)
-            np.random.seed(42 + i)
-            color_int = tuple((np.random.rand(3) * 255).astype(int).tolist())
+        # Get the same color as used for the mask
+        color = np.random.rand(3)
 
-            # Draw box
-            draw.rectangle([x0, y0, x1, y1], outline=color_int, width=3)
-
-            # Draw score if provided
+        # Find the center x and top y of the mask for text placement
+        mask_coords = np.argwhere(mask > 0.5)
+        if len(mask_coords) > 0:
+            # Calculate x center and y top
+            y_top = int(mask_coords[:, 0].min())
+            x_center = int(mask_coords[:, 1].mean())
+            
+            # Convert color to int tuple for text
+            color_int = tuple((color * 255).astype(int).tolist())
+            
+            # Draw text with score if available
             if scores is not None:
-                score = scores[i] if isinstance(scores, (list, np.ndarray)) else scores[i].item()
-                text = f"{score:.2f}"
-                draw.text((x0, y0 - 15), text, fill=color_int)
+                try:
+                    # Handle different score formats
+                    if isinstance(scores, torch.Tensor):
+                        # Flatten tensor and get the i-th score
+                        scores_flat = scores.flatten()
+                        if i < len(scores_flat):
+                            score = scores_flat[i].item()
+                            text = f"id:{i} score:{score:.2f}"
+                        else:
+                            text = f"id:{i}"
+                    elif isinstance(scores, (list, np.ndarray)):
+                        score = scores[i] if isinstance(scores[i], (int, float)) else scores[i].item()
+                        text = f"id:{i} score:{score:.2f}"
+                    else:
+                        text = f"id:{i}"
+                except Exception as e:
+                    text = f"id:{i}"
+                    print(f"Error getting score {i}: {e}")
+            else:
+                text = f"id:{i}"
+            
+            draw.text((x_center, max(0, y_top - 40)), text, fill=color_int)
 
     return result
 
@@ -338,7 +400,6 @@ def parse_bbox(bbox, image_shape=None):
             # It's some kind of sequence
             try:
                 bbox_list = list(bbox)
-
                 if len(bbox_list) == 0:
                     return None
 
@@ -350,7 +411,7 @@ def parse_bbox(bbox, image_shape=None):
                     # Process each element as a potential bbox
                     for elem in bbox_list:
                         coords = None
-                        
+
                         # Try to access as dict-like (KJNodes format)
                         if hasattr(elem, '__getitem__'):
                             try:
@@ -369,7 +430,6 @@ def parse_bbox(bbox, image_shape=None):
                                 inner = list(elem)
                                 if len(inner) == 4:
                                     coords = [float(x) for x in inner]
-                        
                         if coords is not None:
                             all_coords.append(coords)
 
@@ -417,23 +477,29 @@ def parse_bbox(bbox, image_shape=None):
             
             # Normalize to 0-1 range if image shape is provided
             if image_shape is not None:
-                height, width = image_shape[1], image_shape[2]  # [batch, height, width, channels]
+                height, width = image_shape[1], image_shape[2]
                 
                 # Validate within image bounds
                 if coords[0] >= width or coords[2] > width:
                     print(f"Warning: bbox x coordinates ({coords[0]}, {coords[2]}) outside image width ({width})")
                 if coords[1] >= height or coords[3] > height:
                     print(f"Warning: bbox y coordinates ({coords[1]}, {coords[3]}) outside image height ({height})")
-                
+
                 # Normalize coordinates to [0, 1] range
-                coords = [
-                    coords[0] / width,   # x1
-                    coords[1] / height,  # y1
-                    coords[2] / width,   # x2
-                    coords[3] / height   # y2
+                x1 = coords[0] / width
+                y1 = coords[1] / height
+                x2 = coords[2] / width
+                y2 = coords[3] / height
+                new_coords = [
+                    (x1 + x2) / 2,
+                    (y1 + y2) / 2,
+                    x2 - x1,
+                    y2 - y1
                 ]
             
-            validated_coords.append(coords)
+                validated_coords.append(new_coords)
+            else:
+                validated_coords.append(coords)
 
         return validated_coords, len(validated_coords)
 
@@ -442,3 +508,15 @@ def parse_bbox(bbox, image_shape=None):
         error_msg += f"Input type: {type(bbox)}\n"
         error_msg += f"Input content: {repr(bbox)[:500]}"
         raise ValueError(error_msg)
+
+
+if __name__ == "__main__":
+    bboxes = [
+        [
+            159.9,
+            189.5,
+            317.4,
+            329.3
+        ]
+    ]
+    print(parse_bbox(bboxes, image_shape=(1, 832, 480, 3)))

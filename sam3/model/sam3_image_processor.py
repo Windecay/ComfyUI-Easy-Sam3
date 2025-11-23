@@ -132,7 +132,7 @@ class Sam3Processor:
         The label is True for a positive box, False for a negative box.
         """
         if "backbone_out" not in state:
-            raise ValueError("You must call set_image before set_text_prompt")
+            raise ValueError("You must call set_image before add_geometric_prompt")
 
         if "language_features" not in state["backbone_out"]:
             # Looks like we don't have a text prompt yet. This is allowed, but we need to set the text prompt to "visual" for the model to rely only on the geometric prompt
@@ -152,14 +152,14 @@ class Sam3Processor:
         return self._forward_grounding(state)
 
     @torch.inference_mode()
-    def add_multiple_box_prompts(self, boxes: List[List], labels: List[bool], state: Dict):
+    def add_boxes_prompts(self, boxes: List[List], labels: List[bool], state: Dict):
         """Adds multiple box prompts and run the inference.
         The image needs to be set, but not necessarily the text prompt.
         Each box is assumed to be in [center_x, center_y, width, height] format and normalized in [0, 1] range.
         Each label is True for a positive box, False for a negative box.
         """
         if "backbone_out" not in state:
-            raise ValueError("You must call set_image before add_multiple_box_prompts")
+            raise ValueError("You must call set_image before add_boxes_prompt")
 
         if "language_features" not in state["backbone_out"]:
             dummy_text_outputs = self.model.backbone.forward_text(

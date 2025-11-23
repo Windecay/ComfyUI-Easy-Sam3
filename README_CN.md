@@ -46,49 +46,50 @@
 使用文本提示和可选的几何提示分割图像中的对象。
 
 **输入：**
-- `sam3_model`：来自"加载 SAM3 模型"节点的 SAM3 模型
+- `sam3_model`：来自"加载 SAM3 模型"节点的 SAM3 模型（必须是 'image' 模式）
 - `images`：要分割的输入图像
-- `prompt`：要分割的对象的文本描述（例如："一只猫"、"人"）
-- `threshold`：检测的置信度阈值（0.0-1.0，默认：0.60）
-- `keep_model_loaded`：推理后将模型保留在显存中
-- `add_background`：添加背景颜色（无、黑色、白色、灰色）
-- `coordinates_positive`（可选）：正向点坐标以细化分割
-- `coordinates_negative`（可选）：负向点坐标以排除区域
-- `bboxes`（可选）：边界框来引导分割
+- `prompt`：要分割的对象的文本描述（例如："一只猫"、"人"）。支持空字符串以仅使用点/框进行分割
+- `threshold`：检测的置信度阈值（0.0-1.0，步长：0.05，默认：0.40）
+- `keep_model_loaded`：推理后将模型保留在显存中（默认：False）
+- `add_background`：为分割后的图像添加背景颜色（选项：none、black、white、grey，默认：none）
+- `coordinates_positive`（可选）：正向点坐标以细化分割。格式：JSON 字符串，如 `"[{\"x\": 50, \"y\": 120}]"`
+- `coordinates_negative`（可选）：负向点坐标以排除区域。格式：JSON 字符串，如 `"[{\"x\": 150, \"y\": 300}]"`
+- `bboxes`（可选）：边界框来引导分割。格式：(x_min, y_min, x_max, y_max) 或 (x, y, width, height)
 - `mask`（可选）：用于细化的输入遮罩
 
 **输出：**
-- `masks`：分割遮罩
-- `images`：分割后的图像（可选背景）
-- `boxes`：检测到的对象的边界框坐标
-- `scores`：每个检测的置信度分数
+- `masks`：合并的分割遮罩（每张图像一个遮罩，所有检测到的对象合并在一起）
+- `images`：带 RGBA 透明通道的分割图像（可选背景）
+- `obj_masks`：合并前的单个对象遮罩（用于可视化，单独保留所有检测到的对象）
+- `boxes`：每个检测对象的边界框坐标 [N, 4] 格式
+- `scores`：每个检测对象的置信度分数
 
 ### 3. SAM3 视频分割
 跨视频帧跟踪和分割对象，支持高级提示选项。
 
 **输入：**
-- `sam3_model`：视频模式的 SAM3 模型
-- `session_id`（可选）：会话 ID，用于从之前的会话恢复跟踪
-- `video_frames`：作为图像序列的视频帧
-- `prompt`：要跟踪的对象的文本描述（例如："人"、"汽车"）
-- `frame_index`：应用初始提示的帧位置（0 到最大帧数）
-- `object_id`：多对象跟踪的唯一 ID（1-1000，默认：1）
-- `score_threshold_detection`：检测置信度阈值（0.0-1.0，默认：0.5）
-- `new_det_thresh`：添加新对象的阈值（0.0-1.0，默认：0.7）
-- `propagation_direction`：传播方向（双向、前向、后向）
-- `start_frame_index`：开始传播的帧索引（默认：0）
-- `max_frames_to_track`：要处理的最大帧数（-1 表示所有帧）
-- `close_after_propagation`：完成后关闭会话（默认：True）
-- `keep_model_loaded`：推理后将模型保留在显存中
-- `extra_config`（可选）：来自额外配置节点的附加配置
-- `positive_coords`（可选）：正向点击坐标，JSON 数组格式
-- `negative_coords`（可选）：负向点击坐标，JSON 数组格式
-- `bbox`（可选）：用于初始化跟踪的边界框
+- `sam3_model`：来自"加载 SAM3 模型"节点的 SAM3 模型（必须是 'video' 模式）
+- `session_id`（可选）：会话 ID，用于从之前的会话恢复跟踪。如果未提供，将创建新会话
+- `video_frames`：作为图像序列的视频帧（张量格式）
+- `prompt`：要跟踪的对象的文本描述（例如："人"、"汽车"）。支持空字符串以仅使用点/框进行跟踪
+- `frame_index`：应用初始提示的帧索引（最小值：0，最大值：100000，步长：1）。将被限制在有效帧范围内
+- `object_id`：多对象跟踪的唯一 ID（最小值：1，最大值：1000，步长：1，默认：1）
+- `score_threshold_detection`：检测置信度阈值（0.0-1.0，步长：0.05，默认：0.5）
+- `new_det_thresh`：将检测添加为新对象的阈值（0.0-1.0，步长：0.05，默认：0.7）
+- `propagation_direction`：传播遮罩的方向（选项：both、forward、backward，默认：both）
+- `start_frame_index`：开始传播的帧索引（最小值：0，最大值：100000，步长：1，默认：0）
+- `max_frames_to_track`：要处理的最大帧数（最小值：-1，默认：-1 表示所有帧）
+- `close_after_propagation`：传播完成后关闭会话（默认：True）
+- `keep_model_loaded`：推理后将模型保留在显存中（默认：False）
+- `extra_config`（可选）：来自 SAM3 视频模型额外配置节点的附加配置
+- `positive_coords`（可选）：正向点击坐标，JSON 字符串格式。格式：`"[{\"x\": 50, \"y\": 120}]"`
+- `negative_coords`（可选）：负向点击坐标，JSON 字符串格式。格式：`"[{\"x\": 150, \"y\": 300}]"`
+- `bbox`（可选）：用于初始化跟踪的边界框。格式：(x_min, y_min, x_max, y_max) 或 (x, y, width, height)。兼容 KJNodes Points Editor bbox 输出
 
 **输出：**
-- `masks`：所有帧的跟踪分割遮罩
-- `session_id`：用于恢复跟踪的会话 ID
-- `objects`：对象跟踪信息和元数据
+- `masks`：所有帧的跟踪分割遮罩，[B, H, W] 格式，每帧的对象遮罩已合并
+- `session_id`：会话 ID 字符串，用于后续调用中恢复跟踪
+- `objects`：对象跟踪信息字典，包含 `obj_ids` 和 `obj_masks` 数组
 
 ### 4. SAM3 视频模型额外配置
 配置视频分割的高级参数，以微调跟踪行为。
@@ -114,6 +115,19 @@
 
 **输出：**
 - `extra_config`：视频分割节点的配置字典
+
+### 5. Sam3 可视化生成
+在图像上可视化分割遮罩，并叠加边界框和置信度分数。
+
+**输入：**
+- `image`：用于显示遮罩的输入图像（张量格式）
+- `obj_masks`：来自 Sam3 图像分割节点的单个对象遮罩。格式：[B, N, H, W]，其中 N 是对象数量
+- `scores`（可选）：来自 Sam3 图像分割节点的置信度分数（最小值：0，最大值：1，步长：0.0001）
+- `alpha`：遮罩叠加的透明度（0.0-1.0，步长：0.05，默认：0.5）。0=完全透明，1=完全不透明
+- `stroke_width`：遮罩边框的宽度（像素）（最小值：1，最大值：100，步长：1，默认：5）
+
+**输出：**
+- `visualization`：叠加了彩色遮罩、边框和置信度分数的可视化图像
 
 ## 使用示例
 
