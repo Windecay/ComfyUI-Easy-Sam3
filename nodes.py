@@ -900,7 +900,7 @@ class Sam3Visualization(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="easy sam3Visualization",
-            display_name="Sam3 Visualization",
+            display_name="SAM3 Visualization",
             category="EasyUse/Sam3",
             description="Display mask visualization with objects, bounding boxes and confidence scores",
             inputs=[

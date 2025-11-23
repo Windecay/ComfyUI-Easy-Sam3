@@ -259,7 +259,7 @@
     }
   },
   "easy sam3Visualization": {
-    "display_name": "Sam3 可视化",
+    "display_name": "SAM3 可视化",
     "inputs": {
       "image": {
         "name": "image",
