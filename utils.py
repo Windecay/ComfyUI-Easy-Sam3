@@ -240,6 +240,9 @@ def draw_visualize_image(image, masks, scores=None, bboxs=None, alpha=0.5, strok
                     elif isinstance(scores, (list, np.ndarray)):
                         score = scores[i] if isinstance(scores[i], (int, float)) else scores[i].item()
                         text = f"id:{i} score:{score:.2f}"
+                    elif isinstance(scores, float):
+                        score = scores
+                        text = f"id:{i} score:{score:.2f}"
                     else:
                         text = f"id:{i}"
                 except Exception as e:
