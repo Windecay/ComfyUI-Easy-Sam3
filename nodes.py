@@ -397,12 +397,15 @@ class Sam3ImageSegmentation(io.ComfyNode):
             output_raw_masks = torch.stack(output_raw_masks, dim=0)
             logger.debug(f"Output masks shape: {output_masks.shape} (matches input images: {B})")
 
+            output_boxes_list = output_boxes.squeeze(0).cpu().tolist()
+            output_scores_list = output_scores.squeeze().cpu().tolist()
+
             # Clean up if not keeping model loaded
             if not keep_model_loaded:
                 model.to(offload_device)
                 mm.soft_empty_cache()
 
-        return io.NodeOutput(output_masks, output_images,output_raw_masks, output_boxes, output_scores,)
+        return io.NodeOutput(output_masks, output_images,output_raw_masks, output_boxes_list, output_scores_list,)
 
 
 class Sam3VideoSegmentation(io.ComfyNode):
