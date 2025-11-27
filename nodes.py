@@ -6,12 +6,17 @@ import torch
 import comfy.model_management as mm
 import comfy.utils
 import logging
+import base64
+import random
+import io as sys_io
+import hashlib
 
 from contextlib import nullcontext
 
 from PIL import Image
 from typing import Tuple, Any
 from comfy_api.latest import ComfyExtension, io, ui
+from comfy_execution.graph import ExecutionBlocker
 from .sam3.logger import get_logger
 from .utils import tensor_to_pil, pil_to_tensor, masks_to_tensor, join_image_with_alpha, parse_points, parse_bbox, draw_visualize_image
 
@@ -310,12 +315,12 @@ class Sam3ImageSegmentation(io.ComfyNode):
                 if prompt_text:
                     # Split by comma to support multiple prompts
                     text_prompts = [p.strip() for p in prompt_text.split(',') if p.strip()]
-                
+
                 # Collect masks, boxes, scores from all prompts
                 all_masks = []
                 all_boxes = []
                 all_scores = []
-                
+
                 # Process text prompts
                 if len(text_prompts) > 0:
                     logger.info(f"Processing {len(text_prompts)} text prompt(s)")
@@ -323,18 +328,18 @@ class Sam3ImageSegmentation(io.ComfyNode):
                         # Reset state for each prompt
                         prompt_state = processor.set_image(pil_img)
                         prompt_state = processor.set_text_prompt(single_prompt, prompt_state)
-                        
+
                         # Get results for this prompt
                         prompt_masks = prompt_state.get('masks', None)
                         prompt_boxes = prompt_state.get('boxes', None)
                         prompt_scores = prompt_state.get('scores', None)
-                        
+
                         if prompt_masks is not None and len(prompt_masks) > 0:
                             all_masks.append(prompt_masks)
                             all_boxes.append(prompt_boxes)
                             all_scores.append(prompt_scores)
                             logger.info(f"Prompt '{single_prompt}': detected {len(prompt_masks)} object(s)")
-                
+
                 # Process points, bbox, mask prompts (if no text prompts were provided)
                 if len(text_prompts) == 0:
                     # points
@@ -348,12 +353,12 @@ class Sam3ImageSegmentation(io.ComfyNode):
                     # mask
                     if mask is not None:
                         state = processor.add_mask_prompt(mask, state)
-                    
+
                     # Get results
                     prompt_masks = state.get('masks', None)
                     prompt_boxes = state.get('boxes', None)
                     prompt_scores = state.get('scores', None)
-                    
+
                     if prompt_masks is not None and len(prompt_masks) > 0:
                         all_masks.append(prompt_masks)
                         all_boxes.append(prompt_boxes)
@@ -610,7 +615,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
         # Set video model config
         video_predictor.model.score_threshold_detection = score_threshold_detection
         video_predictor.model.new_det_thresh = new_det_thresh
-        
+
         # Set default values for video model parameters
         video_predictor.model.assoc_iou_thresh = 0.1
         video_predictor.model.det_nms_thresh = 0.1
@@ -628,7 +633,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
         video_predictor.model.masklet_confirmation_enable = False
         video_predictor.model.decrease_trk_keep_alive_for_empty_masklets = False
         video_predictor.model.image_size = 1008
-        
+
         # Override with extra_config if provided
         if extra_config is not None and isinstance(extra_config, dict):
             logger.info(f"Applying extra config: {extra_config}")
@@ -739,7 +744,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
                             # Convert mask to tensor and store by frame_idx
                             mask_tensor = torch.from_numpy(mask).float()
                             object_masks_dict[frame_idx] = mask_tensor
-                            
+
                             merged_mask = np.any(mask, axis=0).astype(np.float32)
                             frame_masks = torch.from_numpy(merged_mask)
                             output_masks[frame_idx] = frame_masks
@@ -750,7 +755,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
 
                 # Update progress bar
                 processed_frames += 1
-                pbar.update_absolute(processed_frames, B)           
+                pbar.update_absolute(processed_frames, B)
 
             # close session
             if close_after_propagation:
@@ -760,7 +765,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
                         session_id=session_id,
                     )
                 )
-            
+
             # Switch model back to offload device
             if not keep_model_loaded:
                 video_predictor.model.to(offload_device)
@@ -774,7 +779,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
         if len(obj_masks_by_frame) > 0:
             # Find maximum number of objects across all processed frames
             max_num_objects = max(mask.shape[0] for mask in obj_masks_by_frame.values())
-            
+
             # Create ordered list of obj_masks by frame index
             ordered_obj_masks = []
             for frame_idx in range(B):
@@ -789,12 +794,12 @@ class Sam3VideoSegmentation(io.ComfyNode):
                     # Frame not processed, add empty mask array with correct shape
                     ordered_obj_masks.append(np.zeros((max_num_objects, H, W), dtype=np.float32))
             object_outputs["obj_masks"] = ordered_obj_masks
-        
+
         # Convert object_masks_dict to ordered list and pad to have same number of objects across all frames
         if len(object_masks_dict) > 0:
             # Find the maximum number of objects across all frames
             max_num_objects = max(mask.shape[0] for mask in object_masks_dict.values())
-            
+
             # Create ordered list of masks by frame index, ensuring all B frames are included
             padded_masks = []
             for frame_idx in range(B):
@@ -811,7 +816,7 @@ class Sam3VideoSegmentation(io.ComfyNode):
                 else:
                     # Frame not processed, add empty mask with correct shape
                     padded_masks.append(torch.zeros((max_num_objects, H, W)))
-            
+
             # Now stack all B frames
             object_masks = torch.stack(padded_masks, dim=0)
         else:
@@ -979,7 +984,7 @@ class Sam3VideoModelExtraConfig(io.ComfyNode):
         image_size,
     ) -> io.NodeOutput:
         """Create a configuration dictionary for SAM3 model parameters."""
-        
+
         config = {
             "assoc_iou_thresh": assoc_iou_thresh,
             "det_nms_thresh": det_nms_thresh,
@@ -999,9 +1004,9 @@ class Sam3VideoModelExtraConfig(io.ComfyNode):
             "decrease_trk_keep_alive_for_empty_masklets": decrease_alive_for_empty_masks,
             "image_size": image_size,
         }
-        
+
         logger.info(f"Created SAM3 model config with {len(config)} parameters")
-        
+
         return io.NodeOutput(config)
 
 
@@ -1072,7 +1077,7 @@ class Sam3Visualization(io.ComfyNode):
     def execute(cls, image, obj_masks, alpha=0.5, stroke_width=5, font_size=24, scores=None) -> io.NodeOutput:
         """
         Execute visualization of masks on images.
-        
+
         Args:
             image: Input images tensor [B, H, W, C]
             obj_masks: Object masks tensor [B, N, H, W] where N is number of objects per image
@@ -1080,7 +1085,7 @@ class Sam3Visualization(io.ComfyNode):
             stroke_width: Width of the mask border stroke in pixels
             font_size: Font size for confidence score text
             scores: Optional confidence scores for each object
-            
+
         Returns:
             Visualized images with masks and scores overlaid
         """
@@ -1091,7 +1096,7 @@ class Sam3Visualization(io.ComfyNode):
 
         # Process each image
         visualized_images = []
-        
+
         for idx in range(B):
             pil_image = pil_images[idx]
             raw_masks = obj_masks[idx] if obj_masks is not None else None
@@ -1113,9 +1118,9 @@ class Sam3Visualization(io.ComfyNode):
 
         # Stack all visualized images
         output_images = torch.cat(visualized_images, dim=0)
-        
+
         logger.info(f"Visualized {B} image(s) with masks, boxes and scores")
-        
+
         # Return with preview UI
         return io.NodeOutput(output_images,)
 
@@ -1154,34 +1159,34 @@ class Sam3GetObjectIds(io.ComfyNode):
     def execute(cls, objects) -> io.NodeOutput:
         """
         Get all object IDs from objects output.
-        
+
         Args:
             objects: Dictionary containing:
                 - 'obj_ids': numpy array of object IDs [num_objects]
                 - 'obj_masks': list of numpy arrays for each frame
-            
+
         Returns:
             obj_ids_str: Comma-separated string of all object IDs
             count: Total number of objects
         """
         if objects is None:
             raise ValueError("Objects input cannot be None")
-        
+
         obj_ids = objects.get("obj_ids", None)
-        
+
         if obj_ids is None:
             raise ValueError("Objects must contain 'obj_ids' key")
-        
+
         # Convert obj_ids to numpy array if needed
         if isinstance(obj_ids, torch.Tensor):
             obj_ids = obj_ids.cpu().numpy()
-        
+
         # Get count
         count = len(obj_ids)
-        
+
         # Convert to comma-separated string
         obj_ids = [int(obj_id) for obj_id in obj_ids]
-        
+
         return io.NodeOutput(obj_ids, count)
 
 
@@ -1222,33 +1227,33 @@ class Sam3GetObjectMask(io.ComfyNode):
     def execute(cls, objects, obj_id) -> io.NodeOutput:
         """
         Extract mask for a specific object ID from objects output.
-        
+
         Args:
             objects: Dictionary containing:
                 - 'obj_ids': numpy array of object IDs [num_objects]
                 - 'obj_masks': list of numpy arrays, each [num_objects, H, W] for each frame
             obj_id: Object ID to extract mask for
-            
+
         Returns:
             Batch of masks tensor [num_frames, H, W] for the specified object ID
         """
         if objects is None:
             raise ValueError("Objects input cannot be None")
-        
+
         obj_ids = objects.get("obj_ids", None)
         obj_masks = objects.get("obj_masks", None)
-        
+
         if obj_ids is None or obj_masks is None:
             raise ValueError("Objects must contain both 'obj_ids' and 'obj_masks' keys")
-        
+
         # Convert obj_ids to numpy array if needed
         if isinstance(obj_ids, torch.Tensor):
             obj_ids = obj_ids.cpu().numpy()
-        
+
         # Find the index of the requested obj_id
         try:
             obj_index = np.nonzero(obj_ids == obj_id)[0]
-            
+
             if len(obj_index) == 0:
                 logger.warning(f"Object ID {obj_id} not found in objects. Available IDs: {obj_ids}")
                 # Return empty masks for all frames
@@ -1263,33 +1268,33 @@ class Sam3GetObjectMask(io.ComfyNode):
                 else:
                     empty_masks = torch.zeros((1, 1, 1), dtype=torch.float32)
                 return io.NodeOutput(empty_masks)
-            
+
             obj_index = obj_index[0]
-            
+
             # Extract masks for this object across all frames
             extracted_masks = []
             for frame_masks in obj_masks:
                 # frame_masks is [num_objects, H, W]
                 if isinstance(frame_masks, torch.Tensor):
                     frame_masks = frame_masks.cpu().numpy()
-                
+
                 # Extract the mask for this object in this frame
                 obj_mask = frame_masks[obj_index]
-                
+
                 # Convert boolean mask to float
                 if obj_mask.dtype == bool:
                     obj_mask = obj_mask.astype(np.float32)
-                
+
                 extracted_masks.append(obj_mask)
-            
+
             # Stack all frames: [num_frames, H, W]
             masks_array = np.stack(extracted_masks, axis=0)
             mask_tensor = torch.from_numpy(masks_array).float()
-            
+
             logger.info(f"Extracted masks for object ID {obj_id} with shape {mask_tensor.shape} ({len(obj_masks)} frames)")
-            
+
             return io.NodeOutput(mask_tensor)
-            
+
         except Exception as e:
             logger.error(f"Error extracting object mask: {str(e)}")
             raise ValueError(f"Error extracting object mask for ID {obj_id}: {str(e)}")
@@ -1327,44 +1332,44 @@ class StringToBBox(io.ComfyNode):
     def execute(cls, bbox_string) -> io.NodeOutput:
         """
         Convert string format bounding boxes to BBOX type.
-        
+
         Args:
             bbox_string: String containing bbox coordinates in format "x1,y1,x2,y2"
                         Multiple boxes can be separated by newlines
-            
+
         Returns:
             List of bounding boxes in format [{'startX': x1, 'startY': y1, 'endX': x2, 'endY': y2}, ...]
         """
         if not bbox_string or not bbox_string.strip():
             raise ValueError("Bounding box string cannot be empty")
-        
+
         try:
             # Split by newlines for multiple boxes
             lines = [line.strip() for line in bbox_string.strip().split('\n') if line.strip()]
-            
+
             bboxes = []
             for idx, line in enumerate(lines):
                 # Split by comma
                 parts = [p.strip() for p in line.split(',')]
-                
+
                 if len(parts) != 4:
                     raise ValueError(f"Line {idx + 1}: Expected 4 values (x1,y1,x2,y2), got {len(parts)}")
-                
+
                 try:
                     x1, y1, x2, y2 = [float(p) for p in parts]
                 except ValueError as e:
                     raise ValueError(f"Line {idx + 1}: Could not convert coordinates to numbers: {e}")
-                
+
                 # Validate coordinates
                 if x1 < 0 or y1 < 0 or x2 < 0 or y2 < 0:
                     raise ValueError(f"Line {idx + 1}: Coordinates must be non-negative, got ({x1}, {y1}, {x2}, {y2})")
-                
+
                 if x1 >= x2:
                     raise ValueError(f"Line {idx + 1}: x1 ({x1}) must be less than x2 ({x2})")
-                
+
                 if y1 >= y2:
                     raise ValueError(f"Line {idx + 1}: y1 ({y1}) must be less than y2 ({y2})")
-                
+
                 # Create bbox in KJNodes format
                 bbox_dict = {
                     'startX': x1,
@@ -1373,12 +1378,159 @@ class StringToBBox(io.ComfyNode):
                     'endY': y2
                 }
                 bboxes.append(bbox_dict)
-            
+
             logger.info(f"Parsed {len(bboxes)} bounding box(es) from string")
-            
+
             return io.NodeOutput(bboxes)
-            
+
         except Exception as e:
             raise ValueError(f"Error parsing bounding box string: {str(e)}")
 
 
+class FramesEditor(io.ComfyNode):
+
+    state = {
+        "last_images_hash": None,
+        "cached_preview": None,
+    }
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy framesEditor",
+            display_name="Frames Editor",
+            category="EasyUse/Sam3",
+            description="SAM3 Editor Node",
+            inputs=[
+                io.Image.Input(
+                    "images",
+                    tooltip="Input images for SAM3 Editor"
+                ),
+                io.String.Input(
+                    "info",
+                    default="",
+                ),
+                io.Float.Input(
+                    "preview_rescale",
+                    default=1.0,
+                    min=0.05,
+                    max=1.0,
+                    step=0.05,
+                    tooltip="Scale factor for preview image (coordinates will be converted back to original scale)"
+                )
+            ],
+            outputs=[
+                io.String.Output(
+                    "positive_coords",
+                    display_name="positive_coords",
+                ),
+                io.String.Output(
+                    "negative_coords",
+                    display_name="negative_coords",
+                ),
+                io.BBOX.Output(
+                    "bboxes",
+                    display_name="bboxes",
+                ),
+                io.Int.Output(
+                    "frame_index",
+                    display_name="frame_index",
+                )
+            ],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, images, info, preview_rescale=1.0) -> io.NodeOutput:
+        positive_coords = None
+        negative_coords = None
+        bboxes = None
+        frame_index = 0
+        
+        # Calculate scale factor to convert back to original size
+        needs_scaling = preview_rescale > 0 and preview_rescale < 1.0
+        scale_factor = 1.0 / preview_rescale if needs_scaling else 1.0
+        
+        if info != '':
+            try:
+                info = json.loads(info)
+            except json.JSONDecodeError:
+                info = None
+            
+            if info is not None:
+                positive_coords = info.get("positive_coords", None)
+                negative_coords = info.get("negative_coords", None)
+                box = info.get("bbox", None)
+                frame_index = info.get("frame_index", 0)
+                
+                # Scale coordinates back to original size
+                if needs_scaling:
+                    if positive_coords is not None:
+                        positive_coords = [{"x": coord["x"] * scale_factor, "y": coord["y"] * scale_factor} for coord in positive_coords]
+                            
+                    
+                    if negative_coords is not None:
+                        negative_coords = [{"x": coord["x"] * scale_factor, "y": coord["y"] * scale_factor} for coord in negative_coords]
+                
+                # Process bboxes
+                bboxes = []
+                if box is not None and len(box) > 0:
+                    for i in box:
+                        if needs_scaling:
+                            x = i['x'] * scale_factor
+                            y = i['y'] * scale_factor
+                            w = i['w'] * scale_factor
+                            h = i['h'] * scale_factor
+                        else:
+                            x = i['x']
+                            y = i['y']
+                            w = i['w']
+                            h = i['h']
+                        bboxes.append([x, y, x + w, y + h])
+                
+                # Convert to JSON strings
+                if positive_coords is not None:
+                    positive_coords = json.dumps(positive_coords, ensure_ascii=False)
+                if negative_coords is not None:
+                    negative_coords = json.dumps(negative_coords, ensure_ascii=False)
+                if len(bboxes) > 0:
+                    bboxes = json.dumps(bboxes, ensure_ascii=False)
+                else:
+                    bboxes = None
+        
+        # Prepare images for preview (scale down if needed)
+        preview_images = images
+        if needs_scaling:
+            _, height, width, _ = images.shape
+            new_height = int(height * preview_rescale)
+            new_width = int(width * preview_rescale)
+            
+            # Convert to PIL, resize, and convert back
+            pil_images = tensor_to_pil(images)
+            resized_pil = [img.resize((new_width, new_height), Image.LANCZOS) for img in pil_images]
+            preview_images = pil_to_tensor(resized_pil)
+        
+        # Compute hash of the preview images tensor
+        images_hash = hashlib.md5(preview_images.cpu().numpy().tobytes()).hexdigest()
+        rescale_hash = f"{images_hash}_{preview_rescale}"
+        
+        # Check if we have a cached preview for these images
+        if 'last_images_hash' in cls.state and cls.state['last_images_hash'] == rescale_hash:
+            # Images haven't changed, reuse the cached preview
+            preview_str = cls.state['cached_preview']
+            is_init = False
+        else:
+            preview = ui.ImageSaveHelper.save_images(
+                preview_images,
+                filename_prefix="ComfyUI_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for _ in range(5)),
+                folder_type=ui.FolderType.temp,
+                cls=cls,
+                compress_level=4,
+            )
+            preview_str = json.dumps(preview, ensure_ascii=False)
+            # Cache the preview and hash
+            cls.state['last_images_hash'] = rescale_hash
+            cls.state['cached_preview']= preview_str
+            is_init = True
+
+        return io.NodeOutput(positive_coords, negative_coords, bboxes, frame_index, ui={"preview": [{"preview_str": preview_str, "is_init": is_init}]})

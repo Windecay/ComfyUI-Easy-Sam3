@@ -12,8 +12,16 @@ class Sam3Extension(ComfyExtension):
             Sam3Visualization,
             Sam3GetObjectIds,
             Sam3GetObjectMask,
-            StringToBBox
+            StringToBBox,
+            FramesEditor,
         ]
 
 async def comfy_entrypoint() -> Sam3Extension:
     return Sam3Extension()
+
+# Web directory for custom UI (interactive SAM3 detector)
+WEB_DIRECTORY = "./web"
+
+# Export for ComfyUI
+__all__ = ['WEB_DIRECTORY']
+

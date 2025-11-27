@@ -341,5 +341,40 @@
         "tooltip": "Parsed bounding box in BBOX format"
       }
     }
+  },
+  "easy framesEditor": {
+    "display_name": "Frames Editor",
+    "inputs": {
+      "images": {
+        "name": "images",
+        "tooltip": "Input images or video frames for annotation"
+      },
+      "info": {
+        "name": "info",
+        "tooltip": "JSON string containing annotation data (automatically managed by the widget)"
+      },
+      "preview_rescale": {
+        "name": "preview_rescale",
+        "tooltip": "Scale factor for preview image (0.05-1.0, default: 1.0). When < 1.0, coordinates and bounding boxes will be automatically converted back to original scale"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "positive_coords",
+        "tooltip": "JSON string of positive point coordinates in format '[{\"x\": 50, \"y\": 120}]'"
+      },
+      "1": {
+        "name": "negative_coords",
+        "tooltip": "JSON string of negative point coordinates in format '[{\"x\": 150, \"y\": 300}]'"
+      },
+      "2": {
+        "name": "bboxes",
+        "tooltip": "List of bounding boxes in format [[x1, y1, x2, y2], ...]"
+      },
+      "3": {
+        "name": "frame_index",
+        "tooltip": "Current frame index being edited (for video sequences)"
+      }
+    }
   }
 }

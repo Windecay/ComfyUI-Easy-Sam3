@@ -10,6 +10,7 @@ This node package brings Meta's SAM3 model to ComfyUI, enabling:
 - **Image Segmentation**: Segment objects in images using text descriptions
 - **Video Tracking**: Track and segment objects across video frames
 - **Advanced Configuration**: Fine-tune video tracking parameters for optimal results
+- **Frames Editor**: Interactive visual editor for creating point and bounding box prompts on images and video frames
 
 ### Image Segmentation
 ![Image Segmentation Example](assets/image.png)
@@ -171,6 +172,57 @@ Visualize segmentation masks with bounding boxes and confidence scores overlaid 
 **Outputs:**
 - `visualization`: Visualized images with colored masks, borders, and confidence scores overlaid
 
+### 9. Frames Editor
+Interactive visual editor for creating point and bounding box prompts on images/video frames.
+
+**Inputs:**
+- `images`: Input image or video frames to annotate (tensor format)
+- `info`: JSON string containing annotation data (automatically managed by the widget)
+- `preview_rescale`: Scale factor for preview image (0.05-1.0, step: 0.05, default: 1.0). When < 1.0, the preview image is resized for better performance, and coordinates/bounding boxes are automatically converted back to original scale
+
+**Outputs:**
+- `positive_coords`: JSON string of positive point coordinates in format `"[{\"x\": 50, \"y\": 120}]"`
+- `negative_coords`: JSON string of negative point coordinates in format `"[{\"x\": 150, \"y\": 300}]"`
+- `bboxes`: List of bounding boxes in format `[[x1, y1, x2, y2], ...]`
+- `frame_index`: Current frame index being edited (for video sequences)
+
+**Features:**
+- **Interactive Canvas**: Visual canvas displaying your images/frames
+- **Point Mode**: Click to add positive points (green) or negative points (red)
+- **Box Mode**: Drag to draw bounding boxes for object selection
+- **Frame Navigation**: For video sequences, navigate between frames using slider/controls
+- **Undo/Redo**: Full history support for all annotations
+- **Clear All**: Reset button to remove all annotations
+- **Real-time Preview**: See your annotations overlaid on the image
+
+**Usage:**
+1. Connect images or video frames to the `images` input
+2. The widget displays an interactive canvas with your images
+3. Use the toolbar to switch between Point and Box modes
+4. Click (for points) or drag (for boxes) to create annotations
+5. For video, use the frame slider to navigate and annotate different frames
+6. Connect the outputs directly to SAM3 Image/Video Segmentation nodes
+
+**Toolbar Controls:**
+- **Undo/Redo**: Navigate through annotation history
+- **Clear All**: Remove all annotations from current frame
+- **Point Mode**: Add positive (left-click) or negative (right-click) points
+- **Box Mode**: Drag to draw bounding boxes
+
+**Use Cases:**
+- Create precise point prompts for SAM3 Image Segmentation
+- Draw bounding boxes to guide object detection
+- Annotate video frames for SAM3 Video Segmentation
+- Refine segmentation by adding positive and negative points
+- Quick prototyping and testing of different prompt strategies
+
+**Tips:**
+- Use positive points (green) to indicate "include this region"
+- Use negative points (red) to indicate "exclude this region"
+- Bounding boxes provide a rough area for the model to focus on
+- For video, annotations can be made on any frame index
+- The editor caches image previews for better performance with large datasets
+
 ## Usage Examples
 
 ### Basic Image Segmentation
@@ -179,12 +231,27 @@ Visualize segmentation masks with bounding boxes and confidence scores overlaid 
 3. Provide input images and text prompt
 4. Get segmentation masks and images
 
+### Interactive Image Segmentation with Frames Editor
+1. Load SAM3 Model (mode: image)
+2. Connect images to Frames Editor
+3. Use the interactive canvas to add points or draw boxes
+4. Connect Frames Editor outputs to SAM3 Image Segmentation
+5. See real-time segmentation results based on your annotations
+
 ### Video Object Tracking
 1. Load SAM3 Model (mode: video)
 2. (Optional) Create Extra Config node for advanced settings
 3. Connect to SAM3 Video Segmentation
 4. Provide video frames and tracking parameters
 5. Get tracked masks across all frames
+
+### Interactive Video Segmentation with Frames Editor
+1. Load SAM3 Model (mode: video)
+2. Connect video frames to Frames Editor
+3. Navigate to the frame where you want to start tracking
+4. Add points or boxes to select the object
+5. Connect Frames Editor outputs (including frame_index) to SAM3 Video Segmentation
+6. The model will track your selected object across all frames
 
 ## Model Downloads
 
@@ -208,8 +275,11 @@ This node package supports multiple languages:
 
 ## Credits
 
-- **SAM3**: [Facebook Research](https://github.com/facebookresearch/sam3)
-- **ComfyUI**: [comfyanonymous](https://github.com/comfyanonymous/ComfyUI)
+- **SAM3**：[Facebook Research](https://github.com/facebookresearch/sam3)
+- **ComfyUI**：[comfyanonymous](https://github.com/comfyanonymous/ComfyUI)
+- **ComfyUI-segment-anything-2** ：[ComfyUI-segment-anything-2](https://github.com/kijai/ComfyUI-segment-anything-2)
+- **ComfyUI-KJNodes** ：[ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes)
+- **ComfyUI-Sam3**: [ComfyUI-SAM3](https://github.com/PozzettiAndrea/ComfyUI-SAM3)
 
 ## License
 
@@ -220,6 +290,11 @@ This project follows the license of the original SAM3 repository.
 Contributions are welcome! Please feel free to submit issues or pull requests.
 
 ## Changelog
+
+### v1.0.2
+
+- Added `easy framesEditor` node for interactive image/video frame annotation
+- Fixed bug in `sam3GetObjectMask` node when outputting multiple objects
 
 ### v1.0.1
 
