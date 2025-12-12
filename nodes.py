@@ -777,6 +777,73 @@ class Sam3VideoSegmentation(io.ComfyNode):
         if len(object_masks_dict) > 0:
             # Find the maximum number of objects across all frames
             max_num_objects = max(mask.shape[0] for mask in object_masks_dict.values())
+            
+            # Sort objects by their horizontal position (left to right)
+            # Calculate the center x-coordinate for each object based on first valid frame
+            obj_ids_array = object_outputs.get("obj_ids", None)
+            if obj_ids_array is not None and len(obj_ids_array) > 0:
+                # Find first frame with masks to calculate positions
+                first_valid_frame = None
+                for frame_idx in sorted(object_masks_dict.keys()):
+                    if object_masks_dict[frame_idx].shape[0] > 0:
+                        first_valid_frame = frame_idx
+                        break
+                
+                if first_valid_frame is not None:
+                    first_masks = object_masks_dict[first_valid_frame]
+                    num_objects_in_first = first_masks.shape[0]
+                    
+                    # Calculate center x-coordinate for each object
+                    object_positions = []
+                    for obj_idx in range(num_objects_in_first):
+                        mask = first_masks[obj_idx]
+                        # Find bounding box of the mask
+                        cols = np.any(mask > 0, axis=0)
+                        
+                        if np.any(cols):
+                            # Calculate center x-coordinate
+                            col_indices = np.nonzero(cols)[0]
+                            center_x = np.mean(col_indices)
+                            object_positions.append((obj_idx, center_x))
+                        else:
+                            # Empty mask, place at far right
+                            object_positions.append((obj_idx, W))
+                    
+                    # Sort by x-coordinate (left to right)
+                    object_positions.sort(key=lambda x: x[1])
+                    sort_indices = [pos[0] for pos in object_positions]
+                    
+                    # Reorder obj_ids according to sort_indices
+                    if isinstance(obj_ids_array, np.ndarray):
+                        sorted_obj_ids = obj_ids_array[sort_indices]
+                    elif isinstance(obj_ids_array, list):
+                        sorted_obj_ids = [obj_ids_array[i] for i in sort_indices]
+                    else:
+                        sorted_obj_ids = obj_ids_array
+                    
+                    object_outputs["obj_ids"] = sorted_obj_ids
+                    logger.info(f"Sorted {num_objects_in_first} objects by horizontal position (left to right)")
+                    
+                    # Apply same sorting to all frames' masks
+                    sorted_object_masks_dict = {}
+                    for frame_idx, masks in object_masks_dict.items():
+                        if masks.shape[0] > 0:
+                            # Only apply sorting to indices that exist in this frame
+                            num_objects_in_frame = masks.shape[0]
+                            valid_indices = [idx for idx in sort_indices if idx < num_objects_in_frame]
+                            
+                            if len(valid_indices) == num_objects_in_frame:
+                                # All indices are valid, apply full sorting
+                                sorted_masks = masks[valid_indices]
+                            else:
+                                # Some indices are out of bounds, keep original order
+                                sorted_masks = masks
+                            
+                            sorted_object_masks_dict[frame_idx] = sorted_masks
+                        else:
+                            sorted_object_masks_dict[frame_idx] = masks
+                    
+                    object_masks_dict = sorted_object_masks_dict
 
             # Create ordered list of masks by frame index, ensuring all B frames are included
             ordered_obj_masks = []
@@ -1282,7 +1349,7 @@ class Sam3GetObjectMask(io.ComfyNode):
             masks_array = np.stack(extracted_masks, axis=0)
             mask_tensor = torch.from_numpy(masks_array).float()
 
-            logger.info(f"Extracted masks for object index {obj_id} (ID: {object_id}) with shape {mask_tensor.shape} ({len(obj_masks)} frames)")
+            logger.debug(f"Extracted masks for object index {obj_id} (ID: {object_id}) with shape {mask_tensor.shape} ({len(obj_masks)} frames)")
 
             return io.NodeOutput(mask_tensor)
 
