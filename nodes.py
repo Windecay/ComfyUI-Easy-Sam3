@@ -779,70 +779,85 @@ class Sam3VideoSegmentation(io.ComfyNode):
             max_num_objects = max(mask.shape[0] for mask in object_masks_dict.values())
             
             # Sort objects by their horizontal position (left to right)
-            # Calculate the center x-coordinate for each object based on first valid frame
+            # Calculate the center x-coordinate for each object based on their first appearance
             obj_ids_array = object_outputs.get("obj_ids", None)
             if obj_ids_array is not None and len(obj_ids_array) > 0:
-                # Find first frame with masks to calculate positions
-                first_valid_frame = None
-                for frame_idx in sorted(object_masks_dict.keys()):
-                    if object_masks_dict[frame_idx].shape[0] > 0:
-                        first_valid_frame = frame_idx
-                        break
+                # Track first appearance and position for each object index
+                object_first_positions = {}  # obj_idx -> (frame_idx, center_x)
                 
-                if first_valid_frame is not None:
-                    first_masks = object_masks_dict[first_valid_frame]
-                    num_objects_in_first = first_masks.shape[0]
-                    
-                    # Calculate center x-coordinate for each object
-                    object_positions = []
-                    for obj_idx in range(num_objects_in_first):
-                        mask = first_masks[obj_idx]
-                        # Find bounding box of the mask
-                        cols = np.any(mask > 0, axis=0)
-                        
-                        if np.any(cols):
-                            # Calculate center x-coordinate
-                            col_indices = np.nonzero(cols)[0]
-                            center_x = np.mean(col_indices)
-                            object_positions.append((obj_idx, center_x))
-                        else:
-                            # Empty mask, place at far right
-                            object_positions.append((obj_idx, W))
-                    
-                    # Sort by x-coordinate (left to right)
-                    object_positions.sort(key=lambda x: x[1])
-                    sort_indices = [pos[0] for pos in object_positions]
-                    
-                    # Reorder obj_ids according to sort_indices
+                # Iterate through all frames to find first appearance of each object
+                for frame_idx in sorted(object_masks_dict.keys()):
+                    masks = object_masks_dict[frame_idx]
+                    if masks.shape[0] > 0:
+                        for obj_idx in range(masks.shape[0]):
+                            if obj_idx not in object_first_positions:
+                                mask = masks[obj_idx]
+                                # Find bounding box of the mask
+                                cols = np.any(mask > 0, axis=0)
+                                
+                                if np.any(cols):
+                                    # Calculate center x-coordinate
+                                    col_indices = np.nonzero(cols)[0]
+                                    center_x = np.mean(col_indices)
+                                    object_first_positions[obj_idx] = (frame_idx, center_x)
+                                else:
+                                    # Empty mask, place at far right
+                                    object_first_positions[obj_idx] = (frame_idx, W)
+                
+                if len(object_first_positions) > 0:
+                    # Sort by x-coordinate (left to right), then by frame index for ties
+                    sorted_obj_indices = sorted(
+                        object_first_positions.keys(),
+                        key=lambda idx: (object_first_positions[idx][1], object_first_positions[idx][0])
+                    )
+
+                    # Create mapping from old index to new index
+                    old_to_new_idx = {old_idx: new_idx for new_idx, old_idx in enumerate(sorted_obj_indices)}
+
+                    # Reorder obj_ids according to sorted indices, robust to length mismatches
                     if isinstance(obj_ids_array, np.ndarray):
-                        sorted_obj_ids = obj_ids_array[sort_indices]
+                        try:
+                            # Create an array of length max_num_objects filled with -1 of same dtype
+                            fill_val = -1
+                            try:
+                                fill_val = obj_ids_array.dtype.type(-1)
+                            except Exception:
+                                fill_val = -1
+                            sorted_obj_ids = np.full((max_num_objects,), fill_val, dtype=obj_ids_array.dtype)
+                            for new_pos, old_idx in enumerate(sorted_obj_indices):
+                                if old_idx < obj_ids_array.shape[0]:
+                                    sorted_obj_ids[new_pos] = obj_ids_array[old_idx]
+                        except Exception:
+                            sorted_obj_ids = obj_ids_array
                     elif isinstance(obj_ids_array, list):
-                        sorted_obj_ids = [obj_ids_array[i] for i in sort_indices]
+                        sorted_obj_ids = [None] * max_num_objects
+                        for new_pos, old_idx in enumerate(sorted_obj_indices):
+                            if old_idx < len(obj_ids_array):
+                                sorted_obj_ids[new_pos] = obj_ids_array[old_idx]
                     else:
                         sorted_obj_ids = obj_ids_array
-                    
+
                     object_outputs["obj_ids"] = sorted_obj_ids
-                    logger.info(f"Sorted {num_objects_in_first} objects by horizontal position (left to right)")
-                    
-                    # Apply same sorting to all frames' masks
+                    logger.info(f"Sorted {len(sorted_obj_indices)} objects by horizontal position (left to right)")
+
+                    # Apply same sorting to all frames' masks. Build per-frame masks with length max_num_objects
                     sorted_object_masks_dict = {}
                     for frame_idx, masks in object_masks_dict.items():
                         if masks.shape[0] > 0:
-                            # Only apply sorting to indices that exist in this frame
                             num_objects_in_frame = masks.shape[0]
-                            valid_indices = [idx for idx in sort_indices if idx < num_objects_in_frame]
-                            
-                            if len(valid_indices) == num_objects_in_frame:
-                                # All indices are valid, apply full sorting
-                                sorted_masks = masks[valid_indices]
-                            else:
-                                # Some indices are out of bounds, keep original order
-                                sorted_masks = masks
-                            
+                            # Create target array sized to max_num_objects and fill with zeros
+                            sorted_masks = np.zeros((max_num_objects, masks.shape[1], masks.shape[2]), dtype=masks.dtype)
+                            # For each old index present in this frame, place it at its new index
+                            for old_idx in range(num_objects_in_frame):
+                                if old_idx in old_to_new_idx:
+                                    new_idx = old_to_new_idx[old_idx]
+                                    if 0 <= new_idx < max_num_objects:
+                                        sorted_masks[new_idx] = masks[old_idx]
                             sorted_object_masks_dict[frame_idx] = sorted_masks
                         else:
-                            sorted_object_masks_dict[frame_idx] = masks
-                    
+                            # Create empty masks with shape (max_num_objects, H, W)
+                            sorted_object_masks_dict[frame_idx] = np.zeros((max_num_objects, H, W), dtype=np.float32)
+
                     object_masks_dict = sorted_object_masks_dict
 
             # Create ordered list of masks by frame index, ensuring all B frames are included
